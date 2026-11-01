@@ -46,12 +46,13 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `4834039`.
+Review base for the next candidate: `31855a1`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
 - [x] T2.1 Ledger hardening: verified T2 defects (amount entry, rollback recovery, posting load paging, currency decimals, conversion consistency, double submit, queue re-entrancy, same-day rate test, foreign key check) plus editing and deleting transactions. Commits: `1ed15f4`, `f6d34bd`.
 - [x] T3 Income split: structures, percentages, pending move tasks, screens. Commits: `caf80e7`, `20ac32f`.
+- [x] T3.1 T3 hardening: conversion tolerance independent of how the rate is written, stall deadline from the first waiter, previews that reflect rejection, derived received amount preview, stale save error, metadata kept on edit, forms that cannot strand after saving, migration upgrade test. Commit: `d55be54`.
 - [ ] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste and share input.
 - [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen. Depends on an Android toolchain for build proof.
 - [ ] T6 Planning: flexible budgets, recurring items, cash flow projection.
@@ -146,7 +147,37 @@ T3 evidence:
   - A category default wins over an account default. Defaults on archived structures are ignored, not deleted.
   - Applying and completing respect archives: a run is rejected if a target is archived, and a pending move whose account was archived later cannot be completed until the account is restored, though it can be skipped.
   - The count on the main tab is a row at the top of the Accounts screen, shown when any move is pending, not a badge on the tab. The tab layout gets no focus events, so a badge would go stale.
+- review: medium, declined by the user for this candidate; writer self-verification and parent spot check.
+
+T3.1 done. Route: delegated direct; 2+ non-trivial files.
+
+T3.1 evidence:
+
+- RED: `pnpm test`: 31 failed of 356, 6 suites. `leaveScreen`: its suite failed with `Cannot find module`.
+- GREEN: `pnpm test`: 27 suites, 358 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- Fixed, all verified findings:
+  - Major: rate `1` accepted 100 USD to 149.99 USDT. Now 100.01 passes and 140 fails, with tests for rates `1`, `2`, `0.92`, 0-decimal and 18-decimal currencies, boundaries included.
+  - The stall deadline runs from the first waiter; a test with 10 arrivals over 90 ms of a 100 ms deadline detects at 100 ms.
+  - `0` and negatives no longer preview as "Saved as". A negative source reports non-positive, not a rate mismatch, with or without a received amount.
+  - "You receive" left blank previews the derived amount.
+  - A delete failure is no longer hidden by a stale save error.
+  - An edit keeps metadata keys it does not manage.
+  - `onSuccess` failing no longer strands a form without feedback, and a save with no back history leaves the screen.
+  - A test runs migration 001, real data, then 001 and 002, and checks every ledger table row by row, the foreign key check, an 18-decimal amount, and new tables referencing old rows.
+- The migration tests had no behavioral RED because the upgrade already worked. Adding `DELETE FROM exchange_rates` to migration 002 failed the row by row test, which proves it covers data loss.
+- Not run: no device run, Gradle build, Android export, or screen rendering test, since no render test library is installed. `useSubmit`, `clearError` and the detail screen's banner (finding 5) have no test of their own, and `receivedPreview` is tested but its wiring in `entry-form.tsx` is compiled, never executed. `runSubmission` and `leaveScreen` are tested on their own.
+- Decisions:
+  - Supersedes the T2.1 tolerance. A target is consistent within half a minor unit of the target currency, or within 0.5% of the expected value, boundaries included, in exact bigint arithmetic. Rate `0.92` on 10 now accepts 9.16 to 9.24, and `0.9200` behaves the same.
+  - Half a minor unit means whatever the rate itself produces is always consistent, so a blank received amount can never be rejected as a mismatch.
+  - `deriveRate` starts at 12 decimals and adds 12 until `isConsistentConversion` accepts the result, replacing the old `> 0` test, which accepted a rate off by up to 100% under the new tolerance. Non-positive amounts return `0`.
+  - Previews take a rule: `positive` by default, `non-negative` for fees, `any` for opening and counted balances, which may legitimately be zero or overdrawn.
+  - Supersedes "metadata is rebuilt by the factories" from T2.1. Keys other than `rate`, `rateFrom`, and `rateTo` carry over an edit, and those three never survive a change away from conversion.
+  - After a failure following a successful save, the gate of a screen that exits stays closed and the banner says "Saved, but this screen could not update. Go back to continue." Reopening it would offer a second write of a stored change.
+  - `router.back()` with no history is a silent no-op, not a throw, so every exit goes through `leaveScreen`, which goes home instead. `onSuccess` may return a promise, so the split proposal step after recording is covered too.
+- Skipped on purpose: the finding that editing an older conversion can fail the new tolerance. There are no released users, so no legacy data exists.
 
 ## Next step
 
-T4 Rules engine. Run the ledger and split screens on a device or emulator when a toolchain exists, including migration 002 over an existing database.
+T4 Rules engine. Run the ledger and split screens on a device or emulator when a toolchain exists, including migration 002 over an existing database under `expo-sqlite`.
