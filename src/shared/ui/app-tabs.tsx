@@ -19,6 +19,10 @@ export function AppTabs() {
         <NativeTabs.Trigger.Label>Transactions</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon md="receipt_long" />
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="plan">
+        <NativeTabs.Trigger.Label>Plan</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon md="event_note" />
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="more">
         <NativeTabs.Trigger.Label>More</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon md="more_horiz" />

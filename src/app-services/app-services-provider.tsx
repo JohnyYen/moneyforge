@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
 import { LedgerContext } from '@/features/ledger/ui/ledger-context';
+import { PlanningContext } from '@/features/planning/ui/planning-context';
 import { CaptureContext } from '@/features/rules/ui/capture-context';
 import { RulesContext } from '@/features/rules/ui/rules-context';
 import { SplitContext } from '@/features/split/ui/split-context';
@@ -51,7 +52,9 @@ export function AppServicesProvider({ children }: { children: ReactNode }) {
       <SplitContext.Provider value={state.services.split}>
         <RulesContext.Provider value={state.services.rules}>
           <CaptureContext.Provider value={state.services.capture}>
-            {children}
+            <PlanningContext.Provider value={state.services.planning}>
+              {children}
+            </PlanningContext.Provider>
           </CaptureContext.Provider>
         </RulesContext.Provider>
       </SplitContext.Provider>

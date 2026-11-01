@@ -123,6 +123,16 @@ Android restricts SMS permissions for apps installed outside a store. The settin
 
 The Kotlin code has never been compiled here. See `odd/tasks/moneyforge-app.md` for what is proven.
 
+## Planning
+
+The Plan tab holds budgets, recurring items, and cash flow.
+
+- A budget has one or more expense categories, including their subcategories, a currency, and a period: weekly, monthly, yearly, or a custom start and length. Only expenses count. Transfers and conversions never do. Other currencies convert at the stored rate of the expense day, and a currency with no rate there is reported, never read as zero.
+- With rollover on, what was left or overspent carries from the period the budget started in.
+- A recurring item turns each date into one occurrence at app start. In `ask` mode you confirm, edit, or skip it. In `auto` mode it posts through the ledger, and stays pending with a note if posting fails. Occurrences keep their own copy, so editing an item only changes dates still to come. Schedules run on local calendar days, and a monthly date clamps at short months.
+- History totals income, expense, and net per period and currency, plus the base currency.
+- The projection runs day by day from current balances, adding pending and future occurrences, planned one-offs, and any `ExpectedCashFlowSource`. It shows the first date each balance goes negative. Budgets stay out unless you opt in: then what remains of each current period leaves the total, not any one account, on the day that period ends or on the last day of the horizon.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).

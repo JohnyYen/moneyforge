@@ -31,6 +31,14 @@ export default function RootLayout() {
             <Stack.Screen name="split/apply/[transactionId]" options={{ title: 'Split income' }} />
             <Stack.Screen name="split/moves/index" options={{ title: 'Pending moves' }} />
             <Stack.Screen name="split/moves/[id]" options={{ title: 'Move' }} />
+            <Stack.Screen name="plan/budgets/new" options={{ title: 'New budget' }} />
+            <Stack.Screen name="plan/budgets/[id]" options={{ title: 'Edit budget' }} />
+            <Stack.Screen name="plan/recurring/index" options={{ title: 'Recurring items' }} />
+            <Stack.Screen name="plan/recurring/new" options={{ title: 'New recurring item' }} />
+            <Stack.Screen name="plan/recurring/[id]" options={{ title: 'Edit recurring item' }} />
+            <Stack.Screen name="plan/occurrences/[id]" options={{ title: 'Occurrence' }} />
+            <Stack.Screen name="plan/cash-flow/index" options={{ title: 'Cash flow' }} />
+            <Stack.Screen name="plan/cash-flow/planned" options={{ title: 'Planned item' }} />
             <Stack.Screen name="inbox/index" options={{ title: 'Inbox' }} />
             <Stack.Screen name="inbox/paste" options={{ title: 'Paste a message' }} />
             <Stack.Screen name="inbox/[id]" options={{ title: 'Review message' }} />
