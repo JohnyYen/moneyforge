@@ -46,7 +46,7 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `0d2e9cc`.
+Review base for the next candidate: `0f80acd`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
@@ -54,10 +54,11 @@ Review base for the next candidate: `0d2e9cc`.
 - [x] T3 Income split: structures, percentages, pending move tasks, screens. Commits: `caf80e7`, `20ac32f`.
 - [x] T3.1 T3 hardening: conversion tolerance independent of how the rate is written, stall deadline from the first waiter, previews that reflect rejection, derived received amount preview, stale save error, metadata kept on edit, forms that cannot strand after saving, migration upgrade test. Commit: `d55be54`.
 - [x] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste input. Share input moved to T5. Commits: `599e7d8`, `ba5ea65`.
-- [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen, Android share target. Depends on an Android toolchain for build proof.
+- [x] T4.1 T4 hardening: verified review findings on one-time codes, number scanning, replays, lone transfer sides, reference keys, cross-currency pairs, field caps, purge, rule samples, keyed hashes, `secure_delete`, and `allowBackup`. Commits: `7b1a098`, `49a47f4`.
+- [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen, Android share target. Depends on an Android toolchain for build proof. Background capture must not open a second database connection: all access goes through the one queued `SqlDriver`, because a second connection would lose `PRAGMA foreign_keys` and `secure_delete` and escape the write queue that dedup relies on.
 - [ ] T6 Planning: flexible budgets, recurring items, cash flow projection.
 - [ ] T7 Wealth: assets, asset cash flow, read-only on-chain balances.
-- [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy.
+- [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy. Rule packs exclude samples. Backup must carry `rules.dedup_secret`, or every stored dedup key stops matching after a restore.
 
 ## Acceptance criteria
 
@@ -208,8 +209,37 @@ T4 evidence:
   - Resolved items are never purged, because they are what makes a replay inert. They keep extracted fields such as the counterparty, but no body.
   - Building a rule from an item copies the message into the rule's samples, which outlive retention. T8 must keep samples out of shared rule packs or scrub them.
   - The main tab's composition moved from split to `src/features/rules/ui/main-screen.tsx`, because rules depends on split. A failed purge at start does not block the app and runs again on the next start.
-- Known limit: two sides arriving outside the window can each be posted alone by the user, making two transfers. Each one is an explicit choice.
+- Known limit: two sides arriving outside the window can each be posted alone by the user, making two transfers. Each one is an explicit choice. Superseded in T4.1.
+- review: medium, granted by the user, but native review refused with lens_context_budget_exceeded; independent verifier found 2 blockers and 5 majors, fixed in T4.1.
+
+T4.1 done. Route: delegated direct; 2+ non-trivial files.
+
+T4.1 evidence:
+
+- RED: `pnpm test`: 83 failed of 676, 10 suites. All findings were written as tests first and ran against the T4 code.
+- GREEN: `pnpm test`: 35 suites, 676 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `pnpm expo export --platform android`: exit 0, one 3.1 MB Hermes bundle.
+- Blockers fixed: `Your OTP 482913 for purchase of 250 USD at Amazon` with a matching `autoPost` rule now leaves every table unchanged, and `Tail {amount}{*}` on `Tail 1,500 USD` with `.` format no longer stores 1.00.
+- Not run: no device run, Gradle build, or screen rendering test. `expo-crypto`, `secure_delete` under `expo-sqlite`, and `allowBackup` in a built manifest are compiled or configured, never executed. `assertSecureDeleteEnabled` ran against `node:sqlite` and fakes. `useApproveItem`, its `Alert`, the rule editor hint, and the copy warning's wiring are compiled, never executed; `templateCopyWarning` is tested on its own.
+- Decisions:
+  - Supersedes "the one-time code check runs only on messages no rule matched". It now runs on every message before rule selection. `auth code`, `authorization code`, `approval code`, and `código de autorización` are removed before the weak `code` plus digits test, because that test would otherwise drop purchase notices now that it runs first. Beyond the brief: `approval code` and the Spanish forms. A template whose literals read as a one-time code fails `compileTemplate`, so the editor shows it as well.
+  - Migration 003 was not edited, which differs from the brief. The kind sits inside the keyed reference hash, so the existing `(source_id, reference_key)` index already keys on kind plus reference. A `kind` column in the index would break twice: rejecting clears `kind`, and an edit changes it, and either would let a replay back in. The schema is unreleased, so a later change would still edit 003 directly.
+  - Supersedes "FNV-1a" and "outside the window a message with no reference counts as new". Both dedup keys are HMAC-SHA256 with a label, under `rules.dedup_secret` in `settings`. The secret is created on the first accepted message, outside any write, so a dropped sender or a one-time code writes nothing at all. A write settles a first-use race.
+  - `@noble/hashes` is pinned at 1.8.0 because 2.x ships ESM only, which Jest would not transform without a `jest.config.js` change.
+  - The reference key is hashed inside the ingest write, because the rule that reads the reference is chosen there. It is a synchronous call, so it awaits nothing and cannot hold the driver queue. The body hash and the secret are computed before the write opens.
+  - Same text with no reference is never dropped and never posts by itself. It is held as `proposed` with `autoPost` off and a "Possible repeat" note, and it skips automatic pairing. The window now only changes the wording, "within 10 minutes" against "earlier". The setting became `dedupWindowMinutes` under a new key. A rejected message with no reference that returns therefore asks again, where it used to be inert.
+  - Only a matching reference is a silent replay. A message first seen before its rule existed has no reference key to match, so it is held too.
+  - A lone side being approved looks for an opposite side at any distance through `listUnpairedSides`. It answers `confirmation-required`, and `otherSide: 'same'` or `'different'` settles it, because a monthly transfer of the same amount may be a separate movement. Pair candidates now include lone `proposed` sides, so a side held as a repeat can be found. Confirming across currencies posts from both amounts without showing the implied rate first.
+  - A side that disagrees with the amount of a movement posted alone stays `proposed` with a note, because a posted item is invisible in the inbox. Same-currency sides are covered too, for a transaction edited after posting.
+  - The purge deletes unmatched rows only, and erases the body of `proposed` and `waiting_pair` items, which are never deleted. Pairs stay linked, so the code that returned a partner to waiting is gone.
+  - Field cap: 64 characters for `{counterparty}`, `{reference}`, and `{balance}`, failing the match in `matchTemplate`, so no note is stored when no other rule fits. `{amount}` fails in `evaluateRule` with a note that does not repeat it.
+  - Space thousands: each reading the text allows runs the rest of the template, and two that both fit are a no-match. `Paid {amount} days` on `Paid 500 300 days` has one reading, 500300, so it matches; `Paid {amount} {*}` does not. The field cap bounds the readings.
+  - Supersedes "building a rule copies the message into the samples". The template is still prefilled, and the copy warning fires on a literal from the message with a digit or 12 or more characters. Short wording stays quiet, because every template must share some with its message.
+  - Retention in hours may not be shorter than the transfer window.
+  - An ingest failing after the secret was created keeps the secret, which holds nothing from the message. The two `atomic writes` tests ingest once first, so their snapshots stay exact.
 
 ## Next step
 
-T5 SMS capture, calling `rules.ingestMessage`, plus the Android share target. Run the ledger, split, and rules screens on a device or emulator when a toolchain exists, including migrations 002 and 003 over an existing database under `expo-sqlite`.
+T5 SMS capture, calling `rules.ingestMessage` over the one existing database connection, plus the Android share target. Run the ledger, split, and rules screens on a device or emulator when a toolchain exists, including migrations 002 and 003 over an existing database under `expo-sqlite`.
