@@ -1,6 +1,6 @@
 # MoneyForge app
 
-Engram mirror topic: `odd/moneyforge-app/tasks` (status: pending, see Progress).
+Engram mirror topic: `odd/moneyforge-app/tasks` (status: synced by parent).
 
 ## Objective
 
@@ -46,10 +46,11 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `5f370f1`.
+Review base for the next candidate: `fa3305f`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
+- [x] T2.1 Ledger hardening: verified T2 defects (amount entry, rollback recovery, posting load paging, currency decimals, conversion consistency, double submit, queue re-entrancy, same-day rate test, foreign key check) plus editing and deleting transactions. Commits: `1ed15f4`, `f6d34bd`.
 - [ ] T3 Income split: structures, percentages, pending move tasks, screens.
 - [ ] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste and share input.
 - [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen. Depends on an Android toolchain for build proof.
@@ -98,9 +99,29 @@ T2 evidence:
 - Decisions: net worth leaves archived accounts out and reports currencies with no rate as missing. Rate lookup is direct or inverse only, with no triangulation. A conversion fee is added to the amount sent when in the source currency, and deducted from the amount received when in the target currency. Editing and deleting recorded transactions is out of T2 scope.
 - `expo-sqlite` transactions use one queued connection, because `withExclusiveTransactionAsync` opens a second connection without `PRAGMA foreign_keys`.
 - Run Jest with stdin from `/dev/null` in this environment: a piped run with open stdin hung past 200 seconds once.
+- review: high, declined by the user for this candidate; independent verifier ran; findings fixed in T2.1.
 
-Engram mirror pending: `mem_save` failed earlier this session because the host session registration could not be confirmed.
+T2.1 done. Route: delegated direct; 2+ non-trivial files.
+
+T2.1 evidence:
+
+- RED, defects: `pnpm test`: 29 failed of 174, including re-entrancy cases that hung to the Jest timeout. RED, edit and delete: 11 failed of 197.
+- GREEN: `pnpm test`: 18 suites, 205 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `pnpm expo export --platform android`: exit 0, one 2.8 MB Hermes bundle.
+- The same-day direct rate already worked, so its test had no RED. Removing the `sameDayDirect` branch made it fail, which proves it covers that path.
+- A failed mid-replace was already atomic through the `journal.save` savepoint, so that new test also passed on its first run.
+- Not run: no device run, Gradle build, or screen rendering test. The `expo-sqlite` foreign key check, `useSubmit`, the confirmation dialog, previews, and the new screen are compiled, never executed. `assertForeignKeysEnabled` and the submit gate are tested on their own.
+- Decisions:
+  - Amounts with more fractional digits than the currency allows are rejected, including zeros. Rates have no such bound, so `1,500` as a rate is caught only by the preview.
+  - A conversion with both a received amount and a rate is rejected when they disagree beyond the precision the rate was written with, rather than derived, because a quotient may not be an exact decimal. Rate `0.92` accepts 0.915 to 0.925, and a whole number rate such as `3` accepts 2.5 to 3.5.
+  - The old fixture of 10 USD at 0.92 receiving 9.13 is now rejected, so a provider spread needs the real rate or an empty received amount.
+  - Re-entrancy is detected by a stall, not by call tracing: Hermes has no `AsyncLocalStorage`, and unrelated callers must keep queueing. After 2 seconds with no statement running and a caller waiting, every waiter is rejected with `ReentrantTransactionError` and never runs. Work that awaits something other than the database for that long fails unrelated waiters the same way.
+  - After a failed ROLLBACK the driver raises `TransactionRollbackError`, retries before the next operation, and runs nothing until that succeeds. "No transaction is active" is matched by message and counts as rolled back.
+  - `useSubmit` takes `exitsOnSuccess`, and the gate stays closed after success on screens that leave. Screens that stay reopen it.
+  - Opening entries cannot be edited or deleted here; reconciliations can be deleted but not edited. An edit may keep an account or category archived since, and may change the kind. Metadata is rebuilt by the factories.
 
 ## Next step
 
-Run the T2 ledger on a device or emulator when a toolchain exists, then T3.
+T3 Income split. Run the ledger on a device or emulator when a toolchain exists.
