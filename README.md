@@ -52,6 +52,7 @@ src/
     application/          use cases and ports
     infrastructure/       adapters, such as SQLite
     ui/                   screens and components
+  app-services/           wires the features together, the one place that knows them all
   shared/                 code with no feature of its own
 assets/                   icons and splash images
 ```
@@ -73,6 +74,18 @@ An amount with more fractional digits than its currency allows is rejected, even
 A conversion given both a received amount and a rate is rejected when they disagree beyond the precision the rate was written with: a rate of `0.92` accepts anything from `0.915` to `0.925`. Leave the received amount empty to calculate it from the rate.
 
 Net worth leaves archived accounts out. A currency with no stored rate to the base currency is reported as missing, not valued at zero.
+
+## Income split
+
+A split records a plan for an income and lists the moves to make. It never moves money.
+
+- A structure is your own data: named lines, each with a label, a target account, and an exact percentage. They total 100%, or one line takes the remainder.
+- Applying a structure stores a snapshot of its lines, so later edits never rewrite past runs. An income can have one run.
+- Allocation uses bigint arithmetic and the largest-remainder method, so the amounts sum exactly to the income.
+- A line targeting the income's own account stays in place and creates no move. A line in another currency becomes a conversion, and you enter the amount received when you complete it.
+- Completing a move records a real transfer or conversion, with the actual amount and fee, in one write. Undoing it deletes that transaction.
+- Editing the amount, account, or kind of a split income, or deleting it, is refused while a move is done. With no move done, it cancels the split once you confirm. Deleting a linked transfer returns its move to pending.
+- A default structure per income category or account is proposed when you record income. The category wins.
 
 ## License
 

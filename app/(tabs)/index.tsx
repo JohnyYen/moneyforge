@@ -1,1 +1,1 @@
-export { AccountsScreen as default } from '@/features/ledger/ui/accounts/accounts-screen';
+export { MainScreen as default } from '@/features/split/ui/ledger-screens';

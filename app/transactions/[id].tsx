@@ -1,1 +1,1 @@
-export { TransactionDetailScreen as default } from '@/features/ledger/ui/transactions/transaction-detail-screen';
+export { TransactionScreen as default } from '@/features/split/ui/ledger-screens';

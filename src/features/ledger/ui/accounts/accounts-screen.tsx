@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, type ReactNode } from 'react';
 
 import { QueryBoundary } from '@/shared/ui/primitives';
 import { useFocusQuery } from '@/shared/ui/use-focus-query';
@@ -7,7 +7,7 @@ import { useFocusQuery } from '@/shared/ui/use-focus-query';
 import { useLedger } from '../ledger-context';
 import { AccountsView } from './accounts-view';
 
-export function AccountsScreen() {
+export function AccountsScreen({ header }: { header?: ReactNode }) {
   const ledger = useLedger();
   const router = useRouter();
   const load = useCallback(async () => {
@@ -24,6 +24,7 @@ export function AccountsScreen() {
     <QueryBoundary state={state} onRetry={reload}>
       {({ balances, summary }) => (
         <AccountsView
+          header={header}
           balances={balances}
           summary={summary}
           onOpenAccount={(id) => router.push({ pathname: '/accounts/[id]', params: { id } })}

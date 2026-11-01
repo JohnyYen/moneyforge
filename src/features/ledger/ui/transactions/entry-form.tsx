@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import {
   AmountField,
@@ -39,6 +39,7 @@ export function EntryForm({
   error,
   submitting,
   submitLabel = 'Save',
+  footer,
   onSubmit,
   onDelete,
 }: {
@@ -49,6 +50,7 @@ export function EntryForm({
   error: string | null;
   submitting: boolean;
   submitLabel?: string;
+  footer?: ReactNode;
   onSubmit: (values: EntryValues) => void;
   onDelete?: () => void;
 }) {
@@ -194,6 +196,7 @@ export function EntryForm({
           onPress={onDelete}
         />
       ) : null}
+      {footer}
     </Screen>
   );
 }

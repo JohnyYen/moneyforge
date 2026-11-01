@@ -1,7 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, type ReactNode } from 'react';
 import { Alert } from 'react-native';
 
+import type { Result } from '@/shared/result';
 import {
   Button,
   EmptyState,
@@ -11,13 +12,14 @@ import {
   Screen,
 } from '@/shared/ui/primitives';
 import { useFocusQuery } from '@/shared/ui/use-focus-query';
-import { useSubmit } from '@/shared/ui/use-submit';
 
-import { isDeletable } from '../../domain/journal';
+import { isDeletable, type Transaction } from '../../domain/journal';
+import type { LedgerError } from '../../domain/ledger-error';
 import { occurredAtFromDay } from '../entry-date';
 import { useLedger } from '../ledger-context';
 import { EntryForm } from './entry-form';
 import { toEntryInput, toEntryValues, type EntryValues } from './entry-values';
+import { useConfirmedSubmit } from './use-confirmed-submit';
 
 function confirmDelete(onConfirm: () => void) {
   Alert.alert('Delete this transaction?', 'Balances will change. This cannot be undone.', [
@@ -26,7 +28,14 @@ function confirmDelete(onConfirm: () => void) {
   ]);
 }
 
-export function TransactionDetailScreen() {
+type SaveInput = { readonly values: EntryValues; readonly initialDay: string };
+type SaveResult = Result<Transaction, LedgerError>;
+
+export function TransactionDetailScreen({
+  renderFooter,
+}: {
+  renderFooter?: (transaction: Transaction) => ReactNode;
+}) {
   const { id } = useLocalSearchParams<{ id: string }>();
   const ledger = useLedger();
   const router = useRouter();
@@ -51,19 +60,19 @@ export function TransactionDetailScreen() {
   const { state, reload } = useFocusQuery(load);
 
   const exit = () => router.back();
-  const save = useSubmit(
-    async ({ values, initialDay }: { values: EntryValues; initialDay: string }) => {
+  const save = useConfirmedSubmit(
+    async ({ values, initialDay }: SaveInput, confirmed): Promise<SaveResult> => {
       const occurredAt = occurredAtFromDay(values.day, initialDay);
       if (!occurredAt.ok) return occurredAt;
       const entry = toEntryInput(values, occurredAt.value);
-      return entry.ok ? ledger.updateTransaction(id, entry.value) : entry;
+      return entry.ok ? ledger.updateTransaction(id, entry.value, { confirmed }) : entry;
     },
     exit,
-    { exitsOnSuccess: true },
   );
-  const remove = useSubmit<void, void>(() => ledger.deleteTransaction(id), exit, {
-    exitsOnSuccess: true,
-  });
+  const remove = useConfirmedSubmit(
+    (_: void, confirmed) => ledger.deleteTransaction(id, { confirmed }),
+    exit,
+  );
   const askToDelete = () => confirmDelete(() => void remove.submit());
   const submitting = save.submitting || remove.submitting;
 
@@ -106,6 +115,7 @@ export function TransactionDetailScreen() {
             error={save.error ?? remove.error}
             submitting={submitting}
             submitLabel="Save changes"
+            footer={renderFooter?.(transaction)}
             onSubmit={(values) => void save.submit({ values, initialDay: initial.day })}
             onDelete={askToDelete}
           />

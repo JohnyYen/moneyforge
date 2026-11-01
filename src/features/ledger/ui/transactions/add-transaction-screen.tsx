@@ -6,12 +6,18 @@ import { useFocusQuery } from '@/shared/ui/use-focus-query';
 import { useSubmit } from '@/shared/ui/use-submit';
 
 import { toLocalDay } from '../../application/overview-use-cases';
+import type { Transaction } from '../../domain/journal';
 import { occurredAtFromDay } from '../entry-date';
 import { useLedger } from '../ledger-context';
 import { EntryForm } from './entry-form';
 import { emptyEntryValues, toEntryInput, type EntryValues } from './entry-values';
 
-export function AddTransactionScreen() {
+export function AddTransactionScreen({
+  onRecorded,
+}: {
+  /** Replaces the default of going back, and must leave this screen. */
+  onRecorded?: (transaction: Transaction) => void;
+}) {
   const { accountId } = useLocalSearchParams<{ accountId?: string }>();
   const ledger = useLedger();
   const router = useRouter();
@@ -37,9 +43,11 @@ export function AddTransactionScreen() {
     const entry = toEntryInput(values, occurredAt.value);
     return entry.ok ? ledger.recordEntry(entry.value) : entry;
   };
-  const { submit, error, submitting } = useSubmit(record, () => router.back(), {
-    exitsOnSuccess: true,
-  });
+  const { submit, error, submitting } = useSubmit(
+    record,
+    (transaction) => (onRecorded ? onRecorded(transaction) : router.back()),
+    { exitsOnSuccess: true },
+  );
 
   return (
     <QueryBoundary state={state} onRetry={reload}>

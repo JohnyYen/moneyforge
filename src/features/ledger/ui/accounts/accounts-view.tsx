@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import {
   Button,
   EmptyState,
@@ -17,12 +19,14 @@ import type { NetWorth } from '../../domain/net-worth';
 export type NetWorthSummary = { readonly netWorth: NetWorth; readonly base: Currency };
 
 export function AccountsView({
+  header,
   balances,
   summary,
   onOpenAccount,
   onAddAccount,
   onAddTransaction,
 }: {
+  header?: ReactNode;
   balances: readonly AccountBalance[];
   summary: NetWorthSummary | null;
   onOpenAccount: (id: string) => void;
@@ -43,6 +47,7 @@ export function AccountsView({
 
   return (
     <Screen>
+      {header}
       {summary ? (
         <>
           <Muted>Net worth</Muted>

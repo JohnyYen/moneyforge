@@ -1,1 +1,1 @@
-export { AddTransactionScreen as default } from '@/features/ledger/ui/transactions/add-transaction-screen';
+export { NewTransactionScreen as default } from '@/features/split/ui/ledger-screens';
