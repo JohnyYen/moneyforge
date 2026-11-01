@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, type ReactNode } from 'react';
 
 import { leaveScreen } from '@/shared/ui/leave-screen';
 import { QueryBoundary } from '@/shared/ui/primitives';
@@ -15,9 +15,11 @@ import { emptyEntryValues, toEntryInput, type EntryValues } from './entry-values
 
 export function AddTransactionScreen({
   onRecorded,
+  extraFields,
 }: {
   /** Replaces the default of going back, and must leave this screen. */
   onRecorded?: (transaction: Transaction) => void | Promise<void>;
+  extraFields?: ReactNode;
 }) {
   const { accountId } = useLocalSearchParams<{ accountId?: string }>();
   const ledger = useLedger();
@@ -60,6 +62,7 @@ export function AddTransactionScreen({
           initial={emptyEntryValues(accountId ?? accounts[0]?.id ?? null, today)}
           error={error}
           submitting={submitting}
+          extraFields={extraFields}
           onSubmit={submit}
         />
       )}

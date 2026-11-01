@@ -22,6 +22,7 @@ export function AccountsView({
   header,
   balances,
   summary,
+  summaryExtra,
   onOpenAccount,
   onAddAccount,
   onAddTransaction,
@@ -29,6 +30,7 @@ export function AccountsView({
   header?: ReactNode;
   balances: readonly AccountBalance[];
   summary: NetWorthSummary | null;
+  summaryExtra?: ReactNode;
   onOpenAccount: (id: string) => void;
   onAddAccount: () => void;
   onAddTransaction: () => void;
@@ -58,6 +60,7 @@ export function AccountsView({
               {summary.netWorth.missingRates.join(', ')}
             </Notice>
           ) : null}
+          {summaryExtra}
         </>
       ) : null}
       {active.length > 0 ? <Button label="Add transaction" onPress={onAddTransaction} /> : null}

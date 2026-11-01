@@ -1,1 +1,1 @@
-export { MainScreen as default } from '@/features/rules/ui/main-screen';
+export { MainScreenWithAssets as default } from '@/features/assets/ui/asset-ledger-screens';

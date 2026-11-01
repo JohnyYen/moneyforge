@@ -201,18 +201,45 @@ export function toBudgetDraft(budget: Budget, currency: Currency): BudgetDraft {
   };
 }
 
-export type RecurringDraft = {
+export type ScheduleDraft = {
+  readonly unit: ScheduleUnit;
+  readonly every: string;
+  readonly dayOfMonth: string;
+  readonly startOn: string;
+  readonly endOn: string;
+};
+
+export const emptyScheduleDraft = (today: Day): ScheduleDraft => ({
+  unit: 'month',
+  every: '1',
+  dayOfMonth: '',
+  startOn: today,
+  endOn: '',
+});
+
+export const toSchedule = (draft: ScheduleDraft): Schedule => ({
+  unit: draft.unit,
+  every: Number(draft.every.trim()),
+  startOn: draft.startOn.trim(),
+  endOn: draft.endOn.trim() || null,
+  dayOfMonth: optionalNumber(draft.dayOfMonth),
+});
+
+export const toScheduleDraft = (schedule: Schedule): ScheduleDraft => ({
+  unit: schedule.unit,
+  every: String(schedule.every),
+  dayOfMonth: asText(schedule.dayOfMonth),
+  startOn: schedule.startOn,
+  endOn: schedule.endOn ?? '',
+});
+
+export type RecurringDraft = ScheduleDraft & {
   readonly name: string;
   readonly kind: RecurringKind;
   readonly accountId: string;
   readonly toAccountId: string;
   readonly amount: string;
   readonly categoryId: string;
-  readonly unit: ScheduleUnit;
-  readonly every: string;
-  readonly dayOfMonth: string;
-  readonly startOn: string;
-  readonly endOn: string;
   readonly mode: RecurringMode;
   readonly applySplit: boolean;
 };
@@ -224,11 +251,7 @@ export const emptyRecurringDraft = (today: Day, accountId: string): RecurringDra
   toAccountId: '',
   amount: '',
   categoryId: '',
-  unit: 'month',
-  every: '1',
-  dayOfMonth: '',
-  startOn: today,
-  endOn: '',
+  ...emptyScheduleDraft(today),
   mode: 'ask',
   applySplit: false,
 });
@@ -242,20 +265,13 @@ export function toRecurringInput(draft: RecurringDraft): RecurringInput {
     toAccountId: transfer ? draft.toAccountId || null : null,
     amount: draft.amount,
     categoryId: transfer ? null : draft.categoryId || null,
-    schedule: {
-      unit: draft.unit,
-      every: Number(draft.every.trim()),
-      startOn: draft.startOn.trim(),
-      endOn: draft.endOn.trim() || null,
-      dayOfMonth: optionalNumber(draft.dayOfMonth),
-    },
+    schedule: toSchedule(draft),
     mode: draft.mode,
     applySplit: draft.kind === 'income' && draft.applySplit,
   };
 }
 
 export function toRecurringDraft(item: RecurringItem, currency: Currency): RecurringDraft {
-  const { schedule } = item;
   return {
     name: item.name,
     kind: item.kind,
@@ -263,11 +279,7 @@ export function toRecurringDraft(item: RecurringItem, currency: Currency): Recur
     toAccountId: item.toAccountId ?? '',
     amount: formatDecimal(item.amount, currency.decimals),
     categoryId: item.categoryId ?? '',
-    unit: schedule.unit,
-    every: String(schedule.every),
-    dayOfMonth: asText(schedule.dayOfMonth),
-    startOn: schedule.startOn,
-    endOn: schedule.endOn ?? '',
+    ...toScheduleDraft(item.schedule),
     mode: item.mode,
     applySplit: item.applySplit,
   };

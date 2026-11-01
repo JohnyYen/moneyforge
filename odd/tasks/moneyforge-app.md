@@ -46,7 +46,7 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `b2bb789`.
+Review base for the next candidate: `7c84b92`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
@@ -59,7 +59,8 @@ Review base for the next candidate: `b2bb789`.
 - [x] T5.1 T5 review advisories: keep the queue on a read failure, guard extra removal, keep a consumed share from replaying after process death, require a real amount for the authorization code exemption, make drain independent of navigation. Kotlin uncompiled. Commit: `f44a2e1`.
 - [x] T6 Planning: flexible budgets, recurring items, cash flow projection. Commits: `ce411fd`, `70e822f`.
 - [x] T6.1 T6 hardening: verified review findings on backfill of auto items, budget and recurring double counts, posted notes, rollover edits, refunds, restore on a due date, per-date markers, future budgets, currency decimals, unprojected transfers, and rate lookups. Commits: `a33fdc5`, `5485a50`.
-- [ ] T7 Wealth: assets, asset cash flow, read-only on-chain balances.
+- [x] T7a Assets: types, values, expected and actual cash flow, reports, portfolio, net worth with assets, projection source, Assets tab. Planning follow-ups included. Commits: `ac6a8a5`, `9d4dabf`, and the `feat(assets): add the Assets tab and link transactions from their screens` commit that records this line.
+- [ ] T7b On-chain balances: read-only balances by public address.
 - [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy. Rule packs exclude samples. Backup must carry `rules.dedup_secret`, or every stored dedup key stops matching after a restore.
 
 ## Acceptance criteria
@@ -356,7 +357,41 @@ T6.1 evidence:
   - Posted notes show the newest 50. A pending note cannot be dismissed, because it explains what still needs doing.
   - `CurrencyUsageGuard` is a port on `LedgerRepositories`, defaulting to no other use, and `createAppServices` passes `planningCurrencyUsage`. Only the ledger service's store needs it, since only `updateCurrency` reads it. Planned rows have no currency, so that check joins their account.
   - `converterOn` resolves a rate once. A zero balance in a currency with no rate still does not report it.
+- review: medium, approved by native review
+
+T7a done. Route: delegated direct; 2+ non-trivial files.
+
+T7a evidence:
+
+- RED, planning follow-ups: `pnpm test --testPathPatterns features/planning`: 9 failed of 270, 3 suites. `keeps what carried over through a save with nothing changed` passed before the fix too: the round trip did not restart a carry, so it only guards the new comparisons.
+- RED, assets: domain, 3 suites failed with `Cannot find module`. Application: every test failed, on `services.assets` missing.
+- GREEN: `pnpm test`: 57 suites, 1177 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exported one 3.4 MB Hermes bundle.
+- The assets suites also passed with `TZ` set to `Pacific/Auckland`, `Pacific/Pago_Pago`, and `America/New_York`, 97 of 97 each.
+- Mutations, each failing tests: no cover filter (4), sale ignored (4), sale day still expected (3), yield on a partial net (1), no `ON DELETE CASCADE` (1), rule hook never run (1).
+- Tests prove exact bigint on 18 decimal values and ratios, valuations leaving `transactions`, `postings`, balances, and net worth unchanged, links surviving an edit and dropping on delete, streams in the projection with no double count including early payment and the rule path, sold assets stopping, and missing rates reported in reports, the portfolio, and net worth with assets.
+- Over the 2500 line target: about 4130 authored lines, 1346 of them tests. Commits are sliced so review can take them apart: the planning fix, then domain to storage, then the UI.
+- Not run: no device run, Gradle build, or screen rendering test. Migration 005 ran on `node:sqlite` only, over a version 1 database with data through the migrator test. Every Assets screen, `ScheduleFields`, `AssetLinkFields`, the entry form slot, the `home_work` tab icon, and the five tab bar are compiled, never executed. `asset-model` is tested on its own.
+- Decisions:
+  - Supersedes "categories and currency do not restart" from T6.1. Both restart the carry now. `periodKey` compares what a period means, so a blank start day equals the day it defaults to, and key order or stray keys change nothing. `categoryIds` compare as a set.
+  - Supersedes the marker note on capped dates: `datesDue` in the domain decides which dates a run keeps, and the projection reads the same answer, so a date the cap drops is never projected, whether the run has not happened yet or failed.
+  - A transfer flow carries no category, so it can never reduce a budget reservation.
+  - A linked account must be in the asset's currency, and streams are written in that currency, because `ExpectedCashFlowSource` amounts are in the account's currency and that port has no way to report a missing rate. An asset whose rent lands in an account in another currency either uses that currency or has no linked account; its streams then still appear in reports but not in the projection.
+  - The currency of an asset is fixed after creation, because values and streams store its minor units. `updateAsset` ignores a new one. `CurrencyUsageGuard` now combines planning and assets in `createAppServices`.
+  - Default types are seeded by migration 005, so they run once and stay editable. Types are archived, not deleted. Assets cannot be deleted in this task.
+  - `asset_transaction_links` is keyed by transaction, so one transaction links to one asset, and linking again moves it. Only income and expense link. An edit that later turns a linked entry into a transfer keeps the row, and reports ignore it.
+  - No double count needs an explicit stream and date, not a guess from amounts: `due_on` holds the stream date a transaction fulfils, chosen by `nearestDue` as the closest date no other transaction took, within 3 steps either way, the earlier one on a tie. So rent received 2 days early covers its date, and a second payment takes the next open date. With no date in reach it links to the stream and covers nothing.
+  - Only dates from today on are projected, so an unpaid past stream date is not carried as overdue, unlike a pending recurring date. Reports do count it as expected.
+  - "By a rule" is the new `RulePostHook` port on `RuleRepositories`, a factory like `CurrencyUsageFactory`, run inside the posting write. `asset_rule_links` lives with assets, so rules stay unaware of them. Rules link from the asset's "Rules that link here" screen, not from the rule editor. A stream of the other kind falls back to the asset alone rather than refusing the post.
+  - Current value is the latest by date, one per asset and day, and a later save replaces it. A future date is refused, so is a future sale date. A sale amount is an ordinary linked income.
+  - `netYield` is empty while any linked currency has no rate, because a ratio of a partial net reads as a real figure. `actual` still shows what it could convert, with the missing rates reported. It is the period's net over the latest value, not annualized.
+  - Actual totals convert at the rate of each entry's day into the asset's currency, through `summarizeHistory`, which expected amounts also go through. The portfolio converts values at today's rate and counts this calendar month's links, sold assets included, because that money really moved.
+  - Net worth with assets is one more `computeNetWorth` call over balances plus values, so a total is never the sum of two rounded ones. It is off by default, and the choice is not stored.
+  - The report offers this month, this year, and the last 12 months. `assetReport` takes any range, so a custom one needs only a UI.
+  - `NewTransactionWithAsset`, `TransactionWithAsset`, and `MainScreenWithAssets` wrap the split and rules screens from `src/features/assets/ui`, so neither imports assets. A link after a recorded entry is a second write: a failure there shows "Saved, but this screen could not update".
 
 ## Next step
 
-T7 wealth: assets, asset cash flow through `ExpectedCashFlowSource`, read-only on-chain balances. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, and Plan screens there, including migrations 002, 003, and 004 over an existing database under `expo-sqlite`.
+T7b: read-only on-chain balances by public address. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002, 003, 004, and 005 over an existing database under `expo-sqlite`.

@@ -7,7 +7,13 @@ import { useFocusQuery } from '@/shared/ui/use-focus-query';
 import { useLedger } from '../ledger-context';
 import { AccountsView } from './accounts-view';
 
-export function AccountsScreen({ header }: { header?: ReactNode }) {
+export function AccountsScreen({
+  header,
+  summaryExtra,
+}: {
+  header?: ReactNode;
+  summaryExtra?: ReactNode;
+}) {
   const ledger = useLedger();
   const router = useRouter();
   const load = useCallback(async () => {
@@ -25,6 +31,7 @@ export function AccountsScreen({ header }: { header?: ReactNode }) {
       {({ balances, summary }) => (
         <AccountsView
           header={header}
+          summaryExtra={summaryExtra}
           balances={balances}
           summary={summary}
           onOpenAccount={(id) => router.push({ pathname: '/accounts/[id]', params: { id } })}

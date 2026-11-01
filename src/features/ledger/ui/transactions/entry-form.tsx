@@ -40,6 +40,7 @@ export function EntryForm({
   submitting,
   submitLabel = 'Save',
   footer,
+  extraFields,
   onSubmit,
   onDelete,
 }: {
@@ -51,6 +52,8 @@ export function EntryForm({
   submitting: boolean;
   submitLabel?: string;
   footer?: ReactNode;
+  /** Above the save button, for what another feature records with the entry. */
+  extraFields?: ReactNode;
   onSubmit: (values: EntryValues) => void;
   onDelete?: () => void;
 }) {
@@ -188,6 +191,7 @@ export function EntryForm({
         placeholder="YYYY-MM-DD"
         keyboardType="numbers-and-punctuation"
       />
+      {extraFields}
       <ErrorBanner message={error} />
       <Button
         label={submitLabel}

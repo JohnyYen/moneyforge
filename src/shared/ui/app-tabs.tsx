@@ -23,6 +23,10 @@ export function AppTabs() {
         <NativeTabs.Trigger.Label>Plan</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon md="event_note" />
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="assets">
+        <NativeTabs.Trigger.Label>Assets</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon md="home_work" />
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="more">
         <NativeTabs.Trigger.Label>More</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon md="more_horiz" />

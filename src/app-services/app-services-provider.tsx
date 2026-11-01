@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
+import { AssetsContext } from '@/features/assets/ui/assets-context';
 import { LedgerContext } from '@/features/ledger/ui/ledger-context';
 import { PlanningContext } from '@/features/planning/ui/planning-context';
 import { CaptureContext } from '@/features/rules/ui/capture-context';
@@ -53,7 +54,9 @@ export function AppServicesProvider({ children }: { children: ReactNode }) {
         <RulesContext.Provider value={state.services.rules}>
           <CaptureContext.Provider value={state.services.capture}>
             <PlanningContext.Provider value={state.services.planning}>
-              {children}
+              <AssetsContext.Provider value={state.services.assets}>
+                {children}
+              </AssetsContext.Provider>
             </PlanningContext.Provider>
           </CaptureContext.Provider>
         </RulesContext.Provider>

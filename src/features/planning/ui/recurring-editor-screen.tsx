@@ -22,7 +22,6 @@ import { useFocusQuery } from '@/shared/ui/use-focus-query';
 import { useSubmit } from '@/shared/ui/use-submit';
 
 import type { RecurringKind, RecurringMode } from '../domain/recurring';
-import type { ScheduleUnit } from '../domain/schedule';
 import {
   emptyRecurringDraft,
   pastStartNotice,
@@ -31,18 +30,12 @@ import {
   type RecurringDraft,
 } from './plan-model';
 import { usePlanning } from './planning-context';
+import { ScheduleFields } from './schedule-fields';
 
 const KIND_OPTIONS: readonly { value: RecurringKind; label: string }[] = [
   { value: 'expense', label: 'Expense' },
   { value: 'income', label: 'Income' },
   { value: 'transfer', label: 'Transfer' },
-];
-
-const UNIT_OPTIONS: readonly { value: ScheduleUnit; label: string }[] = [
-  { value: 'day', label: 'Days' },
-  { value: 'week', label: 'Weeks' },
-  { value: 'month', label: 'Months' },
-  { value: 'year', label: 'Years' },
 ];
 
 const MODE_OPTIONS: readonly { value: RecurringMode; label: string }[] = [
@@ -126,35 +119,7 @@ function RecurringForm({
         value={draft.amount}
         onChangeText={(amount) => update({ amount })}
       />
-      <TextField
-        label="Repeat every"
-        keyboardType="numeric"
-        value={draft.every}
-        onChangeText={(every) => update({ every })}
-      />
-      <ChoiceChips
-        options={UNIT_OPTIONS}
-        value={draft.unit}
-        onChange={(unit) => update({ unit })}
-      />
-      {draft.unit === 'month' ? (
-        <TextField
-          label="Day of the month (optional)"
-          keyboardType="numeric"
-          value={draft.dayOfMonth}
-          onChangeText={(dayOfMonth) => update({ dayOfMonth })}
-        />
-      ) : null}
-      <TextField
-        label="Start date, YYYY-MM-DD"
-        value={draft.startOn}
-        onChangeText={(startOn) => update({ startOn })}
-      />
-      <TextField
-        label="End date, YYYY-MM-DD (optional)"
-        value={draft.endOn}
-        onChangeText={(endOn) => update({ endOn })}
-      />
+      <ScheduleFields draft={draft} onChange={update} />
       <ChoiceChips
         label="When a date arrives"
         options={MODE_OPTIONS}

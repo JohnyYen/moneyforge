@@ -133,6 +133,18 @@ The Plan tab holds budgets, recurring items, and cash flow.
 - History totals income, expense, and net per period and currency, plus the base currency.
 - The projection runs day by day from current balances, adding pending and future occurrences, planned one-offs, and any `ExpectedCashFlowSource`. It shows the first date each balance goes negative. Budgets stay out unless you opt in: then what remains of each current period leaves the total, not any one account, on the day that period ends or on the last day of the horizon. Expected expenses in a budget come off what it reserves, because they already leave their accounts. Budgets sharing a category reserve once: the first by name takes the expected expenses and shares its reservation, and a later one reserves only what it has beyond that.
 
+## Assets
+
+The Assets tab holds what you own beyond your accounts. Asset types are user data, seeded with defaults.
+
+- An asset has a type, a currency, an optional linked account in that currency, and notes. Its currency stays fixed once created. Marking it sold stops its expected flows from that date.
+- Values are dated manual entries, and the latest one is the current value. A value is not cash, so it never reaches the ledger.
+- Expected flows are income or expense streams with the same schedule as recurring items.
+- Actual cash flow is the income and expenses linked to an asset: from the transaction form, later from the transaction's screen, or by a message rule. A link survives edits to the transaction and goes when it is deleted. A link to a stream also marks the stream date closest to the transaction as fulfilled.
+- A report for a period shows actual and expected income, expense, and net, plus net yield on the latest value. Linked entries in another currency convert at the rate of their day into the currency of the asset. A currency with no rate is reported, never read as zero, and the yield stays empty until it has one.
+- The portfolio totals active assets at today's rate and nets this month's linked cash flow, in the base currency. Net worth stays accounts only, and "Include assets" shows a second total.
+- The cash flow projection adds streams of assets with a linked account, except dates already fulfilled.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).

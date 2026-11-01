@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, type ReactNode } from 'react';
 
 import type { Transaction } from '@/features/ledger/domain/journal';
 import { AddTransactionScreen } from '@/features/ledger/ui/transactions/add-transaction-screen';
@@ -25,12 +25,21 @@ export function PendingMovesLink() {
   );
 }
 
-export function NewTransactionScreen() {
+export function NewTransactionScreen({
+  extraFields,
+  afterRecorded,
+}: {
+  extraFields?: ReactNode;
+  /** Runs before the split proposal, and a failure reaches the form as one after a save. */
+  afterRecorded?: (transaction: Transaction) => Promise<void>;
+}) {
   const split = useSplit();
   const router = useRouter();
 
-  const proposeOrLeave = ({ id }: Transaction) =>
-    split.splitProposal(id).then(
+  const proposeOrLeave = async (transaction: Transaction) => {
+    const { id } = transaction;
+    await afterRecorded?.(transaction);
+    await split.splitProposal(id).then(
       (proposal) => {
         if (!proposal) leaveScreen(router);
         else {
@@ -42,14 +51,24 @@ export function NewTransactionScreen() {
       },
       () => leaveScreen(router),
     );
+  };
 
-  return <AddTransactionScreen onRecorded={proposeOrLeave} />;
+  return <AddTransactionScreen onRecorded={proposeOrLeave} extraFields={extraFields} />;
 }
 
-export function TransactionScreen() {
+export function TransactionScreen({
+  renderExtra,
+}: {
+  renderExtra?: (transaction: Transaction) => ReactNode;
+}) {
   return (
     <TransactionDetailScreen
-      renderFooter={(transaction) => <TransactionSplitSection transaction={transaction} />}
+      renderFooter={(transaction) => (
+        <>
+          <TransactionSplitSection transaction={transaction} />
+          {renderExtra?.(transaction)}
+        </>
+      )}
     />
   );
 }

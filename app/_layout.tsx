@@ -39,6 +39,13 @@ export default function RootLayout() {
             <Stack.Screen name="plan/occurrences/[id]" options={{ title: 'Occurrence' }} />
             <Stack.Screen name="plan/cash-flow/index" options={{ title: 'Cash flow' }} />
             <Stack.Screen name="plan/cash-flow/planned" options={{ title: 'Planned item' }} />
+            <Stack.Screen name="assets/new" options={{ title: 'Add asset' }} />
+            <Stack.Screen name="assets/types" options={{ title: 'Asset types' }} />
+            <Stack.Screen name="assets/[id]/index" options={{ title: 'Asset' }} />
+            <Stack.Screen name="assets/[id]/edit" options={{ title: 'Edit asset' }} />
+            <Stack.Screen name="assets/[id]/valuation" options={{ title: 'Add value' }} />
+            <Stack.Screen name="assets/[id]/stream" options={{ title: 'Expected flow' }} />
+            <Stack.Screen name="assets/[id]/rules" options={{ title: 'Rules that link here' }} />
             <Stack.Screen name="inbox/index" options={{ title: 'Inbox' }} />
             <Stack.Screen name="inbox/paste" options={{ title: 'Paste a message' }} />
             <Stack.Screen name="inbox/[id]" options={{ title: 'Review message' }} />

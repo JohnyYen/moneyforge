@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, type ReactNode } from 'react';
 
 import { AccountsScreen } from '@/features/ledger/ui/accounts/accounts-screen';
 import { PendingMovesLink } from '@/features/split/ui/ledger-screens';
@@ -20,9 +20,10 @@ function InboxLink() {
 }
 
 /** The main tab with what needs attention on top, so the ledger never imports either feature. */
-export function MainScreen() {
+export function MainScreen({ summaryExtra }: { summaryExtra?: ReactNode }) {
   return (
     <AccountsScreen
+      summaryExtra={summaryExtra}
       header={
         <>
           <InboxLink />
