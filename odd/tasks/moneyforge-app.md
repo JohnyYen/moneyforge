@@ -41,12 +41,13 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 - Persistence: handwritten SQL migrations behind a small `SqlDriver` port, with `expo-sqlite` in production and `node:sqlite` in tests, so the same SQL is exercised by Jest.
 - Tooling: pnpm 11 ignores `node-linker` in `.npmrc`, so `nodeLinker: hoisted` lives in `pnpm-workspace.yaml`. Build scripts for `@parcel/watcher` and `unrs-resolver` are denied through `allowBuilds` because both ship prebuilt binaries. The `lint` script calls `eslint .` directly with the Expo config.
 - Delivery strategy: `exception-ok`. This is a greenfield repository with no remote, built as ordered work-unit commits on one feature branch; the forecast is above 400 authored lines per task, and PR slicing is decided when a remote exists. Each task below is a natural slice boundary.
+- Publication target: Google Play, fully free and open source, with no monetization. The full variant ships on GitHub Releases. Play registration from Cuba is unresolved and is the user's to settle.
 
 ## Tasks
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `7c84b92`.
+Review base for the next candidate: `aaa85ce`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
@@ -60,6 +61,7 @@ Review base for the next candidate: `7c84b92`.
 - [x] T6 Planning: flexible budgets, recurring items, cash flow projection. Commits: `ce411fd`, `70e822f`.
 - [x] T6.1 T6 hardening: verified review findings on backfill of auto items, budget and recurring double counts, posted notes, rollover edits, refunds, restore on a due date, per-date markers, future budgets, currency decimals, unprojected transfers, and rate lookups. Commits: `a33fdc5`, `5485a50`.
 - [x] T7a Assets: types, values, expected and actual cash flow, reports, portfolio, net worth with assets, projection source, Assets tab. Planning follow-ups included. Commits: `ac6a8a5`, `9d4dabf`, and the `feat(assets): add the Assets tab and link transactions from their screens` commit that records this line.
+- [x] T7a.1 T7a hardening: verified findings on stream edits, coverage by amount and current transaction state, overdue expenses, budget double counts, late payments, projection notices, link failures, and report figures. Commit: `df4f609`.
 - [ ] T7b On-chain balances: read-only balances by public address.
 - [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy. Rule packs exclude samples. Backup must carry `rules.dedup_secret`, or every stored dedup key stops matching after a restore.
 
@@ -391,6 +393,37 @@ T7a evidence:
   - Net worth with assets is one more `computeNetWorth` call over balances plus values, so a total is never the sum of two rounded ones. It is off by default, and the choice is not stored.
   - The report offers this month, this year, and the last 12 months. `assetReport` takes any range, so a custom one needs only a UI.
   - `NewTransactionWithAsset`, `TransactionWithAsset`, and `MainScreenWithAssets` wrap the split and rules screens from `src/features/assets/ui`, so neither imports assets. A link after a recorded entry is a second write: a failure there shows "Saved, but this screen could not update".
+- review: medium, granted by the user, native review refused with lens_context_budget_exceeded; independent verifier found 1 blocker and 4 majors, fixed in T7a.1
+
+T7a.1 done. Route: delegated direct; 2+ non-trivial files.
+
+T7a.1 evidence:
+
+- Base: `aaa85ce`. Commit: `df4f609`.
+- RED: `pnpm test --testPathPatterns features/assets`: 26 failed of 108, and the `asset-flows` suite failed to run on the missing `paymentMeasure`.
+- GREEN: `pnpm test`: 57 suites, 1229 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exported one 3.5 MB Hermes bundle.
+- The assets suites also passed with `TZ` set to `Pacific/Auckland`, `Pacific/Pago_Pago`, and `America/New_York`, 149 of 149 each.
+- Mutations, each failing tests: asset guard before the split guard (1), coverage ignoring the amount (4), no refresh on a stream edit (1), asset guard not wired (2).
+- Migration 005 was edited directly, unreleased: `asset_streams.category_id`.
+- Not run: no device run, Gradle build, or screen rendering test. `AssetProjectionNotices`, the stream category chips, the Plan cash flow wrapper, and the save alert are compiled, never executed. `projectionNotices`, `linkAfterSave`, and `droppedSelectionNotice` are tested on their own.
+- Decisions:
+  - Supersedes the `due_on` rule of T7a. `assignDueDates` places every payment of a stream, oldest first, and `refreshStream` writes the answer. It runs on link, unlink, a link moved away, a rule link, a stream edit of any field, and through `createAssetChangeGuard` on a transaction edit or delete. So the result does not depend on link order, and removing a payment gives its date back to the others.
+  - Beyond the brief: delete and unlink also refresh, and a stream edit refreshes on any field, not only the schedule, because the amount decides which dates are full.
+  - Coverage sums the current amounts stored dates hold, through `listPayments`, a join that reads kind, day, amount, and currency from the transaction. A payment of another kind is ignored and its `due_on` empties, and it returns if the kind does.
+  - Beyond the brief: a linked amount in another currency is measured at the rate of its day. With no rate it counts as zero, so the date stays expected, because `ExpectedCashFlowSource` cannot report a missing rate.
+  - A date with part of its amount paid still projects the whole stream amount, as the brief says a short amount covers nothing. So a 500 paid on a 1000 date overstates what is still due by 500 until the date is covered.
+  - `transactionGuard` in `createAppServices` runs split first, since a refusal must come before any write, and assets never refuse. Only the ledger service runs guards, and it is the only caller of `updateTransaction`.
+  - Supersedes "an unpaid past stream date is not carried as overdue". Uncovered expense dates from the last 90 days, from the stream's start and before a sale, are carried to today. The lookback lives in `expectedAssetFlows`, so `cash-flow-use-cases.ts` did not change. Income is not carried.
+  - A late payment takes the most recent open date at or before its day when that is within half a step, `DAYS_PER_UNIT` times `every`. Otherwise the closest open date wins, as before.
+  - A stream category must match its kind, as on recurring items. `categoryId` is required on `ExpectedStream` and empty by default.
+  - "Overlapping schedule" means the same kind, amount, unit, and `every` on the same account, with overlapping date ranges. Two monthly items on different days match, since that is how a duplicate usually looks. A monthly and a weekly item of the same amount do not.
+  - `projectionNotices` covers only active assets with a stream that has not ended. An asset with no streams shows no notice, so the old "Link an account" line no longer shows there.
+  - `CashFlowScreen` takes `projectionExtra`, and `CashFlowWithAssets` wraps it, so planning still does not import assets.
+  - `linkAfterSave` turns a refused or thrown link into an alert and always continues to the split proposal. Supersedes the last sentence of the T7a wrapper decision for a link failure. An alert, because the screen is about to leave.
+  - `difference` is empty while rates are missing. The report's latest value is the latest by the end of its period.
 
 ## Next step
 
