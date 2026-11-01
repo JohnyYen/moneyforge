@@ -12,10 +12,12 @@ import {
 } from '@/shared/ui/primitives';
 import { useFocusQuery } from '@/shared/ui/use-focus-query';
 
+import { useCapture } from './capture-context';
 import { useRules } from './rules-context';
 
 export function SourcesScreen() {
   const rules = useRules();
+  const capture = useCapture();
   const router = useRouter();
   const load = useCallback(() => rules.listSources(), [rules]);
   const { state, reload } = useFocusQuery(load);
@@ -49,6 +51,13 @@ export function SourcesScreen() {
             variant="secondary"
             onPress={() => router.push('/rules/settings')}
           />
+          {capture.available ? (
+            <Button
+              label="SMS capture"
+              variant="secondary"
+              onPress={() => router.push('/rules/capture')}
+            />
+          ) : null}
         </Screen>
       )}
     </QueryBoundary>

@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { ok } from '@/shared/result';
 import {
@@ -17,29 +17,36 @@ import { useFocusQuery } from '@/shared/ui/use-focus-query';
 import { useSubmit } from '@/shared/ui/use-submit';
 
 import type { MessageSource } from '../domain/source';
+import { useCapture } from './capture-context';
 import { useRules } from './rules-context';
 import { ingestResultLabel } from './rules-model';
 
 function PasteForm({
   sources,
+  sharedText,
   notice,
   error,
   submitting,
   onSubmit,
 }: {
   sources: readonly MessageSource[];
+  sharedText: string | null;
   notice: string | null;
   error: string | null;
   submitting: boolean;
   onSubmit: (source: MessageSource, body: string) => void;
 }) {
   const [sourceId, setSourceId] = useState(sources.length === 1 ? sources[0].id : null);
-  const [body, setBody] = useState('');
+  const [body, setBody] = useState(sharedText ?? '');
   const source = sources.find(({ id }) => id === sourceId);
 
   return (
     <Screen>
-      <Muted>Paste a message from your bank. It runs through the same rules as an SMS.</Muted>
+      <Muted>
+        {sharedText
+          ? 'Choose the source of this shared message. Nothing is saved until you add it.'
+          : 'Paste a message from your bank. It runs through the same rules as an SMS.'}
+      </Muted>
       <ChoiceChips
         label="Source"
         options={sources.map(({ id, name }) => ({ value: id, label: name }))}
@@ -60,7 +67,11 @@ function PasteForm({
 
 export function PasteScreen() {
   const rules = useRules();
+  const capture = useCapture();
   const router = useRouter();
+  // Read once, and only this screen's state keeps it after the effect below.
+  const [sharedText] = useState(() => capture.peekShared());
+  useEffect(() => capture.clearShared(), [capture]);
   const load = useCallback(() => rules.listSources(), [rules]);
   const { state, reload } = useFocusQuery(load);
   const [notice, setNotice] = useState<string | null>(null);
@@ -89,13 +100,21 @@ export function PasteScreen() {
         if (enabled.length === 0) {
           return (
             <Screen>
-              <EmptyState title="No sources yet" hint="Add a source before pasting a message." />
+              <EmptyState
+                title="No sources yet"
+                hint={
+                  sharedText
+                    ? 'Add a source, then share this message again.'
+                    : 'Add a source before pasting a message.'
+                }
+              />
             </Screen>
           );
         }
         return (
           <PasteForm
             sources={enabled}
+            sharedText={sharedText}
             notice={notice}
             error={add.error}
             submitting={add.submitting}

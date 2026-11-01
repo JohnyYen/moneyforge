@@ -50,4 +50,6 @@ export type RuleDeps = {
   readonly generateId: IdGenerator;
   /** Called outside any write, so it may take its time. */
   readonly generateSecret: SecretGenerator;
+  /** Runs after a source is saved. It must not reject: the source is already stored. */
+  readonly onSourcesChanged?: () => Promise<void>;
 };

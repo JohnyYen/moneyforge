@@ -1,5 +1,10 @@
 import { createLedgerService } from '@/features/ledger/application/ledger-service';
 import type { Clock, IdGenerator } from '@/features/ledger/application/ports';
+import {
+  absentMessageCapture,
+  createMessageCapture,
+  type MessageCapturePort,
+} from '@/features/rules/application/message-capture';
 import type { SecretGenerator } from '@/features/rules/application/ports';
 import { createSqliteLedgerStore } from '@/features/ledger/infrastructure/sqlite-ledger-store';
 import { createRulesService } from '@/features/rules/application/rules-service';
@@ -17,8 +22,21 @@ export function createAppServices(deps: {
   readonly clock: Clock;
   readonly generateId: IdGenerator;
   readonly generateSecret: SecretGenerator;
+  readonly messageCapture?: MessageCapturePort;
 }) {
   const { driver, clock, generateId, generateSecret } = deps;
+  const rules = createRulesService({
+    store: createSqliteRuleStore(driver),
+    clock,
+    generateId,
+    generateSecret,
+    // A failed sync runs again on the next foreground, and must not fail a saved source.
+    onSourcesChanged: () => capture.syncSenders().catch(() => undefined),
+  });
+  const capture = createMessageCapture({
+    port: deps.messageCapture ?? absentMessageCapture,
+    rules,
+  });
   return {
     ledger: createLedgerService({
       store: createSqliteLedgerStore(driver, splitChangeGuard),
@@ -26,12 +44,8 @@ export function createAppServices(deps: {
       generateId,
     }),
     split: createSplitService({ store: createSqliteSplitStore(driver), clock, generateId }),
-    rules: createRulesService({
-      store: createSqliteRuleStore(driver),
-      clock,
-      generateId,
-      generateSecret,
-    }),
+    rules,
+    capture,
   };
 }
 

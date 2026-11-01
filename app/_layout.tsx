@@ -3,6 +3,7 @@ import { useColorScheme } from 'react-native';
 
 import { AppServicesProvider } from '@/app-services/app-services-provider';
 import { SetupGate } from '@/features/ledger/ui/setup/setup-gate';
+import { CaptureHost } from '@/features/rules/ui/capture-host';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -11,6 +12,7 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AppServicesProvider>
         <SetupGate>
+          <CaptureHost />
           <Stack>
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen name="accounts/new" options={{ title: 'Add account' }} />
@@ -34,6 +36,7 @@ export default function RootLayout() {
             <Stack.Screen name="inbox/[id]" options={{ title: 'Review message' }} />
             <Stack.Screen name="rules/index" options={{ title: 'Messages and rules' }} />
             <Stack.Screen name="rules/settings" options={{ title: 'Message settings' }} />
+            <Stack.Screen name="rules/capture" options={{ title: 'SMS capture' }} />
             <Stack.Screen name="rules/new" options={{ title: 'New rule' }} />
             <Stack.Screen name="rules/[id]" options={{ title: 'Edit rule' }} />
             <Stack.Screen name="rules/sources/new" options={{ title: 'New source' }} />

@@ -139,19 +139,31 @@ async function rematchItem(
 }
 
 export function createRuleUseCases(deps: RuleDeps) {
-  const { store, clock, generateId } = deps;
+  const { store, clock, generateId, onSourcesChanged } = deps;
+
+  const announcingSources = async (result: RuleResult<MessageSource>) => {
+    if (result.ok) await onSourcesChanged?.();
+    return result;
+  };
+
   return {
     listSources: () => store.rules.listSources(),
     getSource: (id: string) => store.rules.getSource(id),
 
-    createSource: (input: SourceInput): Promise<RuleResult<MessageSource>> =>
-      store.atomic((repositories) => writeSource(repositories, { ...input, id: generateId() })),
+    createSource: async (input: SourceInput): Promise<RuleResult<MessageSource>> =>
+      announcingSources(
+        await store.atomic((repositories) =>
+          writeSource(repositories, { ...input, id: generateId() }),
+        ),
+      ),
 
-    updateSource: (input: MessageSource): Promise<RuleResult<MessageSource>> =>
-      store.atomic(async (repositories) => {
-        if (!(await repositories.rules.getSource(input.id))) return notFound('Source');
-        return writeSource(repositories, input);
-      }),
+    updateSource: async (input: MessageSource): Promise<RuleResult<MessageSource>> =>
+      announcingSources(
+        await store.atomic(async (repositories) => {
+          if (!(await repositories.rules.getSource(input.id))) return notFound('Source');
+          return writeSource(repositories, input);
+        }),
+      ),
 
     listRules: (sourceId: string) => store.rules.listRules(sourceId),
     getRule: (id: string) => store.rules.getRule(id),
