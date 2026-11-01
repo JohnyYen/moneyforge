@@ -21,7 +21,7 @@ function askToContinue(message: string, onContinue: () => void) {
  */
 export function useConfirmedSubmit<Input, Value>(
   action: (input: Input, confirmed: boolean) => Promise<Result<Value, LedgerError>>,
-  onSuccess: (value: Value) => void,
+  onSuccess: (value: Value) => void | Promise<void>,
 ) {
   const retry = useRef<(attempt: Attempt<Input>) => void>(() => undefined);
   const { submit, ...rest } = useSubmit(

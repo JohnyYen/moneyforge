@@ -5,6 +5,7 @@ import type { Transaction } from '@/features/ledger/domain/journal';
 import { AccountsScreen } from '@/features/ledger/ui/accounts/accounts-screen';
 import { AddTransactionScreen } from '@/features/ledger/ui/transactions/add-transaction-screen';
 import { TransactionDetailScreen } from '@/features/ledger/ui/transactions/transaction-detail-screen';
+import { leaveScreen } from '@/shared/ui/leave-screen';
 import { ListRow } from '@/shared/ui/primitives';
 import { useFocusQuery } from '@/shared/ui/use-focus-query';
 
@@ -33,10 +34,10 @@ export function NewTransactionScreen() {
   const split = useSplit();
   const router = useRouter();
 
-  const proposeOrLeave = ({ id }: Transaction) => {
+  const proposeOrLeave = ({ id }: Transaction) =>
     split.splitProposal(id).then(
       (proposal) => {
-        if (!proposal) router.back();
+        if (!proposal) leaveScreen(router);
         else {
           router.replace({
             pathname: '/split/apply/[transactionId]',
@@ -44,9 +45,8 @@ export function NewTransactionScreen() {
           });
         }
       },
-      () => router.back(),
+      () => leaveScreen(router),
     );
-  };
 
   return <AddTransactionScreen onRecorded={proposeOrLeave} />;
 }

@@ -2,8 +2,7 @@ import { useRef, useState } from 'react';
 
 import type { Result } from '@/shared/result';
 
-import { createSubmitGate } from './submit-gate';
-import { messageOf } from './use-focus-query';
+import { createSubmitGate, runSubmission } from './submit-gate';
 
 /**
  * Runs a use case from a form, surfacing rule errors and storage failures the same way.
@@ -12,7 +11,7 @@ import { messageOf } from './use-focus-query';
  */
 export function useSubmit<Input, Value>(
   action: (input: Input) => Promise<Result<Value, { readonly message: string }>>,
-  onSuccess: (value: Value) => void,
+  onSuccess: (value: Value) => void | Promise<void>,
   { exitsOnSuccess = false }: { exitsOnSuccess?: boolean } = {},
 ) {
   const [error, setError] = useState<string | null>(null);
@@ -24,19 +23,13 @@ export function useSubmit<Input, Value>(
     if (!gate.current.tryEnter()) return;
     setSubmitting(true);
     setError(null);
-    let succeeded = false;
-    try {
-      const result = await action(input);
-      succeeded = result.ok;
-      if (result.ok) onSuccess(result.value);
-      else setError(result.error.message);
-    } catch (cause) {
-      setError(messageOf(cause));
-    } finally {
-      gate.current.leave(succeeded);
-      setSubmitting(gate.current.isClosed());
-    }
+    await runSubmission(gate.current, {
+      action: () => action(input),
+      onSuccess,
+      onError: setError,
+    });
+    setSubmitting(gate.current.isClosed());
   }
 
-  return { submit, error, submitting };
+  return { submit, error, submitting, clearError: () => setError(null) };
 }

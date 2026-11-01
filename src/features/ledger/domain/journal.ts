@@ -52,6 +52,17 @@ export function isDeletable(transaction: Transaction): boolean {
   return transaction.metadata?.source !== 'opening-balance';
 }
 
+/** `createConversion` writes these from its own inputs. */
+const CONVERSION_METADATA_KEYS: readonly string[] = ['rate', 'rateFrom', 'rateTo'];
+
+/** What an edit carries over: everything the factories do not write themselves. */
+export function carriedMetadata({ metadata }: Transaction): TransactionMetadata | null {
+  const carried = Object.entries(metadata ?? {}).filter(
+    ([key]) => !CONVERSION_METADATA_KEYS.includes(key),
+  );
+  return carried.length > 0 ? Object.fromEntries(carried) : null;
+}
+
 export function isBalanced(postings: readonly Posting[]): boolean {
   const totals = new Map<string, bigint>();
   for (const { currency, amount } of postings) {
@@ -89,7 +100,7 @@ export function createTransaction(
   });
 }
 
-const nonPositive = () =>
+export const nonPositive = () =>
   err(ledgerError('non-positive-amount', 'The amount must be greater than zero.'));
 
 const posting = (accountId: string, amount: bigint, currency: string): Posting => ({

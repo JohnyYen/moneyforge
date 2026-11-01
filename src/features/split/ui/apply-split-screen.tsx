@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 
 import { formatDisplay } from '@/features/ledger/domain/money';
 import { useLedger } from '@/features/ledger/ui/ledger-context';
+import { leaveScreen } from '@/shared/ui/leave-screen';
 import {
   Button,
   ChoiceChips,
@@ -80,7 +81,7 @@ export function ApplySplitScreen() {
   }, [ledger, split, transactionId]);
   const { state, reload } = useFocusQuery(load);
 
-  const exit = () => router.back();
+  const exit = () => leaveScreen(router);
   const apply = useSubmit(
     (structureId: string) => split.applyStructure({ transactionId, structureId }),
     exit,

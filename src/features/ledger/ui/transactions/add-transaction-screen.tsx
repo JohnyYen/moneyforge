@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback } from 'react';
 
+import { leaveScreen } from '@/shared/ui/leave-screen';
 import { QueryBoundary } from '@/shared/ui/primitives';
 import { useFocusQuery } from '@/shared/ui/use-focus-query';
 import { useSubmit } from '@/shared/ui/use-submit';
@@ -16,7 +17,7 @@ export function AddTransactionScreen({
   onRecorded,
 }: {
   /** Replaces the default of going back, and must leave this screen. */
-  onRecorded?: (transaction: Transaction) => void;
+  onRecorded?: (transaction: Transaction) => void | Promise<void>;
 }) {
   const { accountId } = useLocalSearchParams<{ accountId?: string }>();
   const ledger = useLedger();
@@ -45,7 +46,7 @@ export function AddTransactionScreen({
   };
   const { submit, error, submitting } = useSubmit(
     record,
-    (transaction) => (onRecorded ? onRecorded(transaction) : router.back()),
+    (transaction) => (onRecorded ? onRecorded(transaction) : leaveScreen(router)),
     { exitsOnSuccess: true },
   );
 

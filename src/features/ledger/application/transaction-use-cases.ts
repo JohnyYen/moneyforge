@@ -4,6 +4,7 @@ import type { Account } from '../domain/account';
 import type { CategoryKind } from '../domain/category';
 import type { Currency } from '../domain/currency';
 import {
+  carriedMetadata,
   createAdjustment,
   createConversion,
   createExpense,
@@ -11,6 +12,7 @@ import {
   createTransfer,
   isDeletable,
   isEditable,
+  nonPositive,
   type Transaction,
 } from '../domain/journal';
 import { ledgerError, type LedgerError } from '../domain/ledger-error';
@@ -68,6 +70,7 @@ const entryFields = (input: EntryFields, basis: EntryBasis) => ({
   id: basis.id,
   occurredAt: input.occurredAt ?? basis.occurredAt,
   description: input.description ?? '',
+  metadata: basis.existing && carriedMetadata(basis.existing),
 });
 
 /** An edit may keep an account archived since, so old entries stay correctable. */
@@ -175,6 +178,7 @@ async function buildConversion(
     ? parseDecimal(input.targetAmount, target.decimals)
     : ok(convertMinor(sourceAmount.value, rate.value, source.decimals, target.decimals));
   if (!targetAmount.ok) return targetAmount;
+  if (sourceAmount.value <= 0n || targetAmount.value <= 0n) return nonPositive();
   // Rejected rather than derived: a quotient of two amounts can be a repeating decimal,
   // which an exact rate string cannot hold, and a typo in either field should surface.
   if (

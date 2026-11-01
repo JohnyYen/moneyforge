@@ -5,6 +5,7 @@ import { Alert } from 'react-native';
 import { formatDecimal } from '@/features/ledger/domain/money';
 import { amountPreview, ratePreview } from '@/features/ledger/ui/amount-preview';
 import { useLedger } from '@/features/ledger/ui/ledger-context';
+import { leaveScreen } from '@/shared/ui/leave-screen';
 import {
   AmountField,
   Button,
@@ -81,7 +82,7 @@ function CompletionForm({
         label="Fee (optional)"
         value={fee}
         onChangeText={setFee}
-        preview={amountPreview(fee, feeTarget)}
+        preview={amountPreview(fee, feeTarget, 'non-negative')}
       />
       {conversion && fee && targetCode ? (
         <ChoiceChips
@@ -132,7 +133,7 @@ export function MoveScreen() {
   }, [id, ledger, split]);
   const { state, reload } = useFocusQuery(load);
 
-  const exit = () => router.back();
+  const exit = () => leaveScreen(router);
   const options = { exitsOnSuccess: true };
   const complete = useSubmit(
     (fields: CompletionFields) => split.completeMove({ ...fields, moveId: id }),

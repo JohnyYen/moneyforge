@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback } from 'react';
 
+import { leaveScreen } from '@/shared/ui/leave-screen';
 import { EmptyState, QueryBoundary, Screen } from '@/shared/ui/primitives';
 import { useFocusQuery } from '@/shared/ui/use-focus-query';
 import { useSubmit } from '@/shared/ui/use-submit';
@@ -20,7 +21,7 @@ export function ReconcileScreen() {
   const { state, reload } = useFocusQuery(load);
   const { submit, error, submitting } = useSubmit(
     (countedBalance: string) => ledger.reconcile({ accountId: id, countedBalance }),
-    () => router.back(),
+    () => leaveScreen(router),
     { exitsOnSuccess: true },
   );
 

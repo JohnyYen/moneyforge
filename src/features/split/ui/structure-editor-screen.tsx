@@ -2,6 +2,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback } from 'react';
 
 import { useLedger } from '@/features/ledger/ui/ledger-context';
+import { leaveScreen } from '@/shared/ui/leave-screen';
 import { EmptyState, QueryBoundary, Screen } from '@/shared/ui/primitives';
 import { useFocusQuery } from '@/shared/ui/use-focus-query';
 import { useSubmit } from '@/shared/ui/use-submit';
@@ -28,7 +29,7 @@ export function StructureEditorScreen() {
   }, [id, ledger, split]);
   const { state, reload } = useFocusQuery(load);
 
-  const exit = () => router.back();
+  const exit = () => leaveScreen(router);
   const save = useSubmit(
     (draft: StructureDraft) =>
       id

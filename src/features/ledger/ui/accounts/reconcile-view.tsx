@@ -40,7 +40,7 @@ export function ReconcileView({
         label="Actual balance"
         value={counted}
         onChangeText={setCounted}
-        preview={amountPreview(counted, currency)}
+        preview={amountPreview(counted, currency, 'any')}
         autoFocus
       />
       {difference !== null ? (

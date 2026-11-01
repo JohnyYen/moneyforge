@@ -50,26 +50,71 @@ describe('formatRate', () => {
 });
 
 describe('isConsistentConversion', () => {
-  const consistent = (source: bigint, target: bigint, text: string) =>
-    isConsistentConversion(source, target, rate(text), 2, 2);
+  const consistent = (source: bigint, target: bigint, text: string, from = 2, to = 2) =>
+    isConsistentConversion(source, target, rate(text), from, to);
 
   it('accepts the exact conversion', () => {
     expect(consistent(1000n, 920n, '0.92')).toBe(true);
   });
 
-  it('accepts any amount the rate could produce once rounded to its written digits', () => {
-    expect(consistent(1000n, 915n, '0.92')).toBe(true);
-    expect(consistent(1000n, 925n, '0.92')).toBe(true);
+  it('allows small spreads and rejects typos at a rate of 1', () => {
+    expect(consistent(10000n, 10001n, '1')).toBe(true);
+    expect(consistent(10000n, 14000n, '1')).toBe(false);
+    expect(consistent(10000n, 14999n, '1')).toBe(false);
   });
 
-  it('rejects an amount outside that range', () => {
-    expect(consistent(1000n, 914n, '0.92')).toBe(false);
-    expect(consistent(1000n, 926n, '0.92')).toBe(false);
+  it.each([
+    ['1', 10000n, 9950n, 10050n],
+    ['2', 10000n, 19900n, 20100n],
+    ['0.92', 1000n, 916n, 924n],
+  ])('stops half a percent from the expected amount at a rate of %s', (text, source, low, high) => {
+    expect(consistent(source, low, text)).toBe(true);
+    expect(consistent(source, high, text)).toBe(true);
+    expect(consistent(source, low - 1n, text)).toBe(false);
+    expect(consistent(source, high + 1n, text)).toBe(false);
   });
 
-  it('tightens with the precision of the rate', () => {
-    expect(consistent(1000n, 918n, '0.9180')).toBe(true);
-    expect(consistent(1000n, 919n, '0.9180')).toBe(false);
+  it('gives the same answer however the rate is written', () => {
+    for (const target of [915n, 916n, 924n, 925n]) {
+      expect(consistent(1000n, target, '0.9200')).toBe(consistent(1000n, target, '0.92'));
+    }
+    expect(consistent(10000n, 20500n, '2.00')).toBe(false);
+  });
+
+  it('allows half a minor unit where the percentage is smaller than that', () => {
+    expect(consistent(150n, 1n, '0.01')).toBe(true);
+    expect(consistent(150n, 2n, '0.01')).toBe(true);
+    expect(consistent(150n, 3n, '0.01')).toBe(false);
+  });
+
+  it('holds for a currency with no decimals', () => {
+    expect(consistent(100000n, 100500n, '1', 0, 0)).toBe(true);
+    expect(consistent(100000n, 100501n, '1', 0, 0)).toBe(false);
+    expect(consistent(3n, 2n, '0.5', 0, 0)).toBe(true);
+    expect(consistent(3n, 1n, '0.5', 0, 0)).toBe(true);
+    expect(consistent(3n, 3n, '0.5', 0, 0)).toBe(false);
+  });
+
+  it('holds exactly at 18 decimals', () => {
+    const one = 1000000000000000000n;
+    const band = 5000000000000000n;
+
+    expect(consistent(one, one + band, '1', 18, 18)).toBe(true);
+    expect(consistent(one, one - band, '1', 18, 18)).toBe(true);
+    expect(consistent(one, one + band + 1n, '1', 18, 18)).toBe(false);
+    expect(consistent(one, one - band - 1n, '1', 18, 18)).toBe(false);
+  });
+
+  it('always accepts what the rate itself produces', () => {
+    for (const [source, text, from, to] of [
+      [1n, '0.5', 0, 0],
+      [149n, '0.01', 2, 2],
+      [12345n, '0.000000000001', 2, 18],
+      [987654321n, '1234.5678', 6, 0],
+    ] as const) {
+      const target = convertMinor(source, rate(text), from, to);
+      expect(isConsistentConversion(source, target, rate(text), from, to)).toBe(true);
+    }
   });
 
   it('compares across currencies of different precision', () => {
@@ -102,5 +147,23 @@ describe('deriveRate', () => {
 
   it('keeps digits for a tiny rate', () => {
     expect(check(BigInt(`1${'0'.repeat(30)}`), 1n, 18, 2).consistent).toBe(true);
+  });
+
+  it('adds digits until the rate agrees with the amounts', () => {
+    expect(check(10000000000000n, 6n, 0, 0)).toEqual({
+      text: '0.0000000000006',
+      consistent: true,
+    });
+  });
+
+  it('agrees with the amounts across precisions and sizes', () => {
+    const amounts = [1n, 3n, 7n, 999n, 123456789n, 10n ** 20n, 10n ** 31n + 7n];
+    for (const source of amounts) {
+      for (const target of amounts) {
+        for (const [from, to] of [[0, 0], [2, 2], [0, 18], [18, 0], [18, 18]]) {
+          expect(check(source, target, from, to).consistent).toBe(true);
+        }
+      }
+    }
   });
 });

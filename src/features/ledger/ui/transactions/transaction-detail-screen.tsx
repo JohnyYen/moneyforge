@@ -3,6 +3,7 @@ import { useCallback, type ReactNode } from 'react';
 import { Alert } from 'react-native';
 
 import type { Result } from '@/shared/result';
+import { leaveScreen } from '@/shared/ui/leave-screen';
 import {
   Button,
   EmptyState,
@@ -59,7 +60,7 @@ export function TransactionDetailScreen({
   }, [id, ledger]);
   const { state, reload } = useFocusQuery(load);
 
-  const exit = () => router.back();
+  const exit = () => leaveScreen(router);
   const save = useConfirmedSubmit(
     async ({ values, initialDay }: SaveInput, confirmed): Promise<SaveResult> => {
       const occurredAt = occurredAtFromDay(values.day, initialDay);
@@ -73,7 +74,16 @@ export function TransactionDetailScreen({
     (_: void, confirmed) => ledger.deleteTransaction(id, { confirmed }),
     exit,
   );
-  const askToDelete = () => confirmDelete(() => void remove.submit());
+  // Each attempt clears the other's error, so the banner never shows a stale failure.
+  const askToDelete = () =>
+    confirmDelete(() => {
+      save.clearError();
+      void remove.submit();
+    });
+  const submitSave = (input: SaveInput) => {
+    remove.clearError();
+    void save.submit(input);
+  };
   const submitting = save.submitting || remove.submitting;
 
   return (
@@ -116,7 +126,7 @@ export function TransactionDetailScreen({
             submitting={submitting}
             submitLabel="Save changes"
             footer={renderFooter?.(transaction)}
-            onSubmit={(values) => void save.submit({ values, initialDay: initial.day })}
+            onSubmit={(values) => submitSave({ values, initialDay: initial.day })}
             onDelete={askToDelete}
           />
         );

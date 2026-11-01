@@ -460,6 +460,31 @@ describe('income split', () => {
       await expect(balanceOf(euros.id)).resolves.toBe(33333n);
     });
 
+    it('derives a rate the conversion accepts, however tiny it is', async () => {
+      const dai = await account('Dai', 'DAI');
+      const dollars = await account('Dollars');
+      const structure = unwrap(
+        await services.split.createStructure({
+          name: 'Cash out',
+          lines: [line('Cash', dollars.id, '100')],
+        }),
+      );
+      const transaction = await income(dai.id, '100000000000');
+      const { moves } = unwrap(
+        await services.split.applyStructure({
+          transactionId: transaction.id,
+          structureId: structure.id,
+        }),
+      );
+
+      const completed = unwrap(
+        await services.split.completeMove({ moveId: moves[0].id, targetAmount: '0.06' }),
+      );
+
+      expect(completed.transaction.metadata?.rate).toBe('0.0000000000006');
+      await expect(balanceOf(dollars.id)).resolves.toBe(6n);
+    });
+
     it('needs the amount received for a conversion', async () => {
       const { toEuros } = await applied();
 

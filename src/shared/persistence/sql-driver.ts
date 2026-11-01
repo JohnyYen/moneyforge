@@ -83,9 +83,13 @@ export function createSqlDriver(
     stallTimer = null;
   }
 
+  /** Leaves a running timer alone, so later arrivals cannot postpone the deadline. */
   function watchForStall() {
-    stopStallTimer();
-    if (!workRunning || statementsRunning > 0 || waiters.size === 0) return;
+    if (!workRunning || statementsRunning > 0 || waiters.size === 0) {
+      stopStallTimer();
+      return;
+    }
+    if (stallTimer !== null) return;
     stallTimer = setTimeout(() => {
       stallTimer = null;
       const rejected = [...waiters];

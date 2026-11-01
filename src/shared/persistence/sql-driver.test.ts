@@ -239,6 +239,73 @@ describe('SqlDriver re-entrancy', () => {
   });
 });
 
+describe('SqlDriver stall deadline', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  const stalledDriver = async (stallTimeoutMs: number) => {
+    const driver = createSqlDriver(fakeConnection().connection, async () => undefined, {
+      stallTimeoutMs,
+    });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const transaction = driver.transaction(() => gate);
+    await jest.advanceTimersByTimeAsync(0);
+    return { driver, transaction, release };
+  };
+
+  it('runs from the first waiter, so steady arrivals do not postpone detection', async () => {
+    const { driver, transaction, release } = await stalledDriver(100);
+    const failures: unknown[] = [];
+    const wait = () => {
+      driver.get('SELECT outside').catch((error: unknown) => failures.push(error));
+    };
+
+    wait();
+    for (let arrival = 0; arrival < 9; arrival += 1) {
+      await jest.advanceTimersByTimeAsync(10);
+      wait();
+    }
+    expect(failures).toEqual([]);
+
+    await jest.advanceTimersByTimeAsync(10);
+
+    expect(failures).toHaveLength(10);
+    for (const failure of failures) expect(failure).toBeInstanceOf(ReentrantTransactionError);
+    release();
+    await transaction;
+  });
+
+  it('starts a fresh period for a waiter arriving after a detection', async () => {
+    const { driver, transaction, release } = await stalledDriver(100);
+    const first = driver.get('SELECT outside').catch((error: unknown) => error);
+    await jest.advanceTimersByTimeAsync(100);
+    await expect(first).resolves.toBeInstanceOf(ReentrantTransactionError);
+
+    let settled = false;
+    const second = driver
+      .get('SELECT outside')
+      .catch((error: unknown) => error)
+      .finally(() => {
+        settled = true;
+      });
+    await jest.advanceTimersByTimeAsync(99);
+    expect(settled).toBe(false);
+
+    await jest.advanceTimersByTimeAsync(1);
+    await expect(second).resolves.toBeInstanceOf(ReentrantTransactionError);
+    release();
+    await transaction;
+  });
+});
+
 describe('assertForeignKeysEnabled', () => {
   it('passes on a connection that enforces them', async () => {
     const driver = createNodeSqliteDriver();

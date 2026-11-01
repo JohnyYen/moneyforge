@@ -381,6 +381,45 @@ describe('ledger service', () => {
       await expect(balanceOf(euros.id)).resolves.toBe(0n);
     });
 
+    it.each([
+      ['a negative amount sent', '-10', ''],
+      ['a zero amount sent', '0', ''],
+      ['a negative amount sent with a received amount', '-10', '9.20'],
+      ['a negative amount received', '10', '-9.20'],
+    ])('reports %s as non-positive, not as a rate mismatch', async (_, sourceAmount, targetAmount) => {
+      const dollars = await account('Dollars', 'USD', '100');
+      const euros = await account('Euros', 'EUR');
+
+      await expect(
+        ledger.recordConversion({
+          fromAccountId: dollars.id,
+          toAccountId: euros.id,
+          sourceAmount,
+          targetAmount,
+          rate: '0.92',
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: 'non-positive-amount' } });
+    });
+
+    it('accepts a small spread at a rate of 1 and rejects a large one', async () => {
+      const dollars = await account('Dollars', 'USD', '1000');
+      const euros = await account('Euros', 'EUR');
+      const convert = (targetAmount: string) =>
+        ledger.recordConversion({
+          fromAccountId: dollars.id,
+          toAccountId: euros.id,
+          sourceAmount: '100',
+          targetAmount,
+          rate: '1',
+        });
+
+      await expect(convert('100.01')).resolves.toMatchObject({ ok: true });
+      await expect(convert('140')).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'inconsistent-conversion' },
+      });
+    });
+
     it('parses a conversion fee by the decimals of its own currency', async () => {
       const dollars = await account('Dollars', 'USD', '100');
       const wallet = await account('Wallet', 'DAI');
@@ -533,6 +572,75 @@ describe('ledger service', () => {
       ).resolves.toMatchObject({ ok: false, error: { code: 'inconsistent-conversion' } });
 
       await expect(ledger.getTransaction(original.id)).resolves.toEqual(original);
+    });
+
+    const tagMetadata = (id: string, metadata: Record<string, string>) =>
+      driver.run('UPDATE transactions SET metadata = ? WHERE id = ?', [
+        JSON.stringify(metadata),
+        id,
+      ]);
+
+    it('keeps metadata an edit does not manage', async () => {
+      const dollars = await account('Dollars', 'USD', '100');
+      const original = unwrap(await ledger.recordExpense({ accountId: dollars.id, amount: '10' }));
+      await tagMetadata(original.id, { ruleId: 'rule-1' });
+
+      const edited = unwrap(
+        await ledger.updateTransaction(original.id, {
+          kind: 'income',
+          accountId: dollars.id,
+          amount: '12',
+        }),
+      );
+
+      expect(edited.metadata).toEqual({ ruleId: 'rule-1' });
+      await expect(ledger.getTransaction(original.id)).resolves.toMatchObject({
+        metadata: { ruleId: 'rule-1' },
+      });
+    });
+
+    it('rewrites conversion metadata and keeps the rest', async () => {
+      const dollars = await account('Dollars', 'USD', '100');
+      const euros = await account('Euros', 'EUR');
+      const conversion = { fromAccountId: dollars.id, toAccountId: euros.id, sourceAmount: '10' };
+      const original = unwrap(await ledger.recordConversion({ ...conversion, rate: '0.92' }));
+      await tagMetadata(original.id, { ...original.metadata, ruleId: 'rule-1' });
+
+      const edited = unwrap(
+        await ledger.updateTransaction(original.id, {
+          ...conversion,
+          kind: 'conversion',
+          rate: '0.95',
+        }),
+      );
+
+      expect(edited.metadata).toEqual({
+        ruleId: 'rule-1',
+        rate: '0.95',
+        rateFrom: 'USD',
+        rateTo: 'EUR',
+      });
+    });
+
+    it('drops the rate when a conversion becomes another kind', async () => {
+      const dollars = await account('Dollars', 'USD', '100');
+      const euros = await account('Euros', 'EUR');
+      const original = unwrap(
+        await ledger.recordConversion({
+          fromAccountId: dollars.id,
+          toAccountId: euros.id,
+          sourceAmount: '10',
+          rate: '0.92',
+        }),
+      );
+      const expense = { kind: 'expense', accountId: dollars.id, amount: '10' } as const;
+
+      const plain = unwrap(await ledger.updateTransaction(original.id, expense));
+      expect(plain.metadata).toBeNull();
+
+      await tagMetadata(original.id, { ruleId: 'rule-1', rate: 'stale' });
+      const tagged = unwrap(await ledger.updateTransaction(original.id, expense));
+      expect(tagged.metadata).toEqual({ ruleId: 'rule-1' });
     });
 
     it('keeps an archived account or category the entry already uses, and no other', async () => {

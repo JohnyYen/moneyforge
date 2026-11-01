@@ -78,6 +78,7 @@ export function AccountForm({
         preview={amountPreview(
           openingBalance,
           currencies.find(({ code }) => code === currencyCode),
+          'any',
         )}
         placeholder="0"
       />

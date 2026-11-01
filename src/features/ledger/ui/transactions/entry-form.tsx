@@ -14,7 +14,7 @@ import {
 import type { Account } from '../../domain/account';
 import type { Category } from '../../domain/category';
 import type { Currency } from '../../domain/currency';
-import { amountPreview, ratePreview } from '../amount-preview';
+import { amountPreview, ratePreview, receivedPreview } from '../amount-preview';
 import type { EntryValues } from './entry-values';
 
 const ENTRY_KIND_OPTIONS = [
@@ -140,7 +140,13 @@ export function EntryForm({
             label="You receive (optional, calculated from the rate)"
             value={values.targetAmount}
             onChangeText={(text) => set('targetAmount', text)}
-            preview={amountPreview(values.targetAmount, currencyOf(destination?.currencyCode))}
+            preview={receivedPreview({
+              received: values.targetAmount,
+              sent: values.amount,
+              rate: values.rate,
+              source: currencyOf(source?.currencyCode),
+              target: currencyOf(destination?.currencyCode),
+            })}
           />
         </>
       ) : null}
@@ -149,7 +155,7 @@ export function EntryForm({
           label="Fee (optional)"
           value={values.fee}
           onChangeText={(text) => set('fee', text)}
-          preview={amountPreview(values.fee, currencyOf(feeCurrencyCode))}
+          preview={amountPreview(values.fee, currencyOf(feeCurrencyCode), 'non-negative')}
         />
       ) : null}
       {kind === 'conversion' && values.fee && feeCurrencies.length === 2 ? (
