@@ -9,7 +9,7 @@ MoneyForge never moves real money and never holds custody of funds.
 ## Stack
 
 - Expo SDK 58 with Expo Router, React Native, and TypeScript in strict mode
-- SQLite on the device
+- SQLite on the device through `expo-sqlite`, with handwritten versioned migrations
 - Jest for tests, ESLint with the Expo config for linting
 - pnpm with the hoisted node linker
 
@@ -55,6 +55,18 @@ src/
   shared/                 code with no feature of its own
 assets/                   icons and splash images
 ```
+
+## Ledger
+
+Accounts, categories, and currencies are user data. Defaults are seeded once and stay editable.
+
+Every movement is a double-entry journal entry whose postings sum to zero per currency. Each currency has hidden system accounts for income, expense, equity, and conversion clearing. The app shows only user accounts.
+
+Money is a `bigint` in minor units, stored as TEXT, because stablecoins reach 18 decimals. Exchange rates are exact decimal strings. Floats are never used for amounts or rates.
+
+`src/shared/persistence` holds the `SqlDriver` port, the migrations, and the `expo-sqlite` and `node:sqlite` adapters. Tests run the production SQL on `node:sqlite`.
+
+Net worth leaves archived accounts out. A currency with no stored rate to the base currency is reported as missing, not valued at zero.
 
 ## License
 

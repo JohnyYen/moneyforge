@@ -6,6 +6,11 @@ export type ExactRate = { readonly numerator: bigint; readonly denominator: bigi
 
 const RATE_PATTERN = /^(\d*)(?:\.(\d*))?$/;
 
+/** Built from text: Babel can compile `**` to `Math.pow`, which throws on bigint. */
+function powerOfTen(exponent: number): bigint {
+  return BigInt(`1${'0'.repeat(exponent)}`);
+}
+
 export function parseRate(text: string): Result<ExactRate, LedgerError> {
   const invalid = err(ledgerError('invalid-rate', 'Enter a rate greater than zero.'));
   const match = RATE_PATTERN.exec(text.trim());
@@ -14,7 +19,7 @@ export function parseRate(text: string): Result<ExactRate, LedgerError> {
   if (!match || (whole === '' && fraction === '')) return invalid;
   const numerator = BigInt(`${whole}${fraction}`);
   if (numerator === 0n) return invalid;
-  return ok({ numerator, denominator: 10n ** BigInt(fraction.length) });
+  return ok({ numerator, denominator: powerOfTen(fraction.length) });
 }
 
 export function invertRate(rate: ExactRate): ExactRate {
@@ -27,8 +32,8 @@ export function convertMinor(
   fromDecimals: number,
   toDecimals: number,
 ): bigint {
-  const numerator = minor * rate.numerator * 10n ** BigInt(toDecimals);
-  const denominator = rate.denominator * 10n ** BigInt(fromDecimals);
+  const numerator = minor * rate.numerator * powerOfTen(toDecimals);
+  const denominator = rate.denominator * powerOfTen(fromDecimals);
   return divideRoundingHalfAwayFromZero(numerator, denominator);
 }
 
