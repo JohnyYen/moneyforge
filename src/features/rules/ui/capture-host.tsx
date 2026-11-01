@@ -1,37 +1,34 @@
-import { useRootNavigationState, useRouter } from 'expo-router';
-import { useEffect } from 'react';
+import { router, useRootNavigationState } from 'expo-router';
+import { useEffect, useMemo } from 'react';
 import { AppState } from 'react-native';
 
 import { useCapture } from './capture-context';
+import { createCaptureHostFlow } from './capture-host-flow';
 
-/** Runs capture work at app start and on foreground, once there is a navigator to open from. */
+/** Runs capture work at app start and on foreground. */
 export function CaptureHost() {
   const capture = useCapture();
-  const router = useRouter();
   const navigatorReady = Boolean(useRootNavigationState()?.key);
+  const flow = useMemo(
+    () => createCaptureHostFlow(capture, () => router.push('/inbox/paste')),
+    [capture],
+  );
 
   useEffect(() => {
-    if (!navigatorReady) return;
-
-    const openShared = () =>
-      void capture.receiveShared().then((received) => {
-        if (received) router.push('/inbox/paste');
-      });
-    const refresh = () => {
-      void capture.refresh();
-      openShared();
-    };
-
-    refresh();
+    flow.onForeground();
     const appState = AppState.addEventListener('change', (state) => {
-      if (state === 'active') refresh();
+      if (state === 'active') flow.onForeground();
     });
-    const stopSharing = capture.onSharedText(openShared);
+    const stopSharing = capture.onSharedText(flow.onSharedText);
     return () => {
       appState.remove();
       stopSharing();
     };
-  }, [capture, navigatorReady, router]);
+  }, [capture, flow]);
+
+  useEffect(() => {
+    flow.setNavigatorReady(navigatorReady);
+  }, [flow, navigatorReady]);
 
   return null;
 }

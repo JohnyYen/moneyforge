@@ -73,11 +73,46 @@ const DIGIT_CODE = /\b[0-9]{4,8}\b/;
 const BARE_CODE = /^[a-z]{0,2}-?[0-9]{4,8}\.?$/i;
 // A purchase notice names these, so only there do they say nothing about a one-time code.
 const AUTHORIZATION_CODE =
-  /\b(?:auth(?:orization)?|approval) codes?\b|\bc[oó]digos? de (?:autorizaci[oó]n|aprobaci[oó]n)\b/gi;
+  /\b(?:(?:auth(?:orization)?|approval) codes?|c[oó]digos? de (?:autorizaci[oó]n|aprobaci[oó]n))\b/gi;
+// With the digits it names, so the code itself can never pass as the amount of its own notice.
+const AUTHORIZATION_CODE_VALUE = new RegExp(
+  `${AUTHORIZATION_CODE.source}[\\s:#]*(?:(?:is|es|of|de|no\\.?)\\s+)?[0-9]+`,
+  'gi',
+);
 const PURCHASE_CONTEXT =
   /\b(?:purchase|paid|payment|charged|approved|transaction|compra|pago|cargo|aprobad[ao]|transacci[oó]n)\b/i;
-const NUMBER = /[0-9]+(?:[.,][0-9]+)*/g;
+// Dates and times stay one token, which then fails the shape of an amount.
+const NUMBER_TOKEN = /[0-9]+(?:[.,/:-][0-9]+)*/g;
+const AMOUNT_SHAPE = /^[0-9]+(?:[.,][0-9]{3})*(?:[.,][0-9]{1,2})?$/;
+const DECIMAL_PART = /[.,][0-9]{2}$/;
+const YEAR = /^(?:19|20)[0-9]{2}$/;
+const SYMBOL_BEFORE = /[$€£¥₹]\s*$/;
+const SYMBOL_AFTER = /^\s*[$€£¥₹]/;
+// A known list, because any three letters would let `REF 5521` pass as an amount.
+const CURRENCY_NAMES =
+  'usd|eur|gbp|jpy|cny|chf|cad|aud|nzd|sek|nok|dkk|mxn|cop|brl|ars|clp|pen|uyu|bob|pyg|ves|dop|crc|gtq|hnl|nio|pab|inr|krw|try|zar|usdt|usdc|dai|btc|eth|pesos|d[oó]lares|dollars|euros';
+const CURRENCY_BEFORE = new RegExp(`\\b(?:${CURRENCY_NAMES})\\s*$`, 'i');
+const CURRENCY_AFTER = new RegExp(`^\\s*(?:${CURRENCY_NAMES})\\b`, 'i');
+const AMOUNT_WORD_BEFORE = /\b(?:of|de|por|amount|monto|valor|total)[\s:]*$/i;
+const COUNTED_THING_AFTER =
+  /^\s*(?:sec|secs|seconds?|min|mins|minutes?|hours?|hrs?|days?|digits?|segundos?|minutos?|horas?|d[ií]as?|d[ií]gitos?)\b/i;
 const DO_NOT_SHARE =/\b(?:do not|don'?t|never) share\b|\bno (?:lo |la )?compart[ai]s?\b/i;
+
+/** A count alone proves nothing: a date or a second code would pass as the amount. */
+function hasMoneyAmount(text: string): boolean {
+  for (const match of text.matchAll(NUMBER_TOKEN)) {
+    const token = match[0];
+    if (!AMOUNT_SHAPE.test(token)) continue;
+    const before = text.slice(0, match.index);
+    const after = text.slice(match.index + token.length);
+    if (SYMBOL_BEFORE.test(before) || SYMBOL_AFTER.test(after)) return true;
+    if (CURRENCY_BEFORE.test(before) || CURRENCY_AFTER.test(after)) return true;
+    if (DECIMAL_PART.test(token)) return true;
+    const counted = YEAR.test(token) || COUNTED_THING_AFTER.test(after);
+    if (AMOUNT_WORD_BEFORE.test(before) && !counted) return true;
+  }
+  return false;
+}
 
 export function looksLikeOneTimeCode(body: string): boolean {
   const text = normalizeBody(body);
@@ -85,7 +120,8 @@ export function looksLikeOneTimeCode(body: string): boolean {
   if (DO_NOT_SHARE.test(text) && DIGIT_CODE.test(text)) return true;
   // A code alone is not a purchase notice: without a separate amount no rule could post it anyway,
   // so failing toward privacy here loses nothing.
-  const isPurchaseNotice = PURCHASE_CONTEXT.test(text) && (text.match(NUMBER) ?? []).length >= 2;
+  const isPurchaseNotice =
+    PURCHASE_CONTEXT.test(text) && hasMoneyAmount(text.replace(AUTHORIZATION_CODE_VALUE, ' '));
   const rest = isPurchaseNotice ? text.replace(AUTHORIZATION_CODE, ' ') : text;
   return CODE_WORDS.test(rest) && DIGIT_CODE.test(rest);
 }

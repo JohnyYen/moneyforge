@@ -124,6 +124,15 @@ describe('looksLikeOneTimeCode', () => {
     'Your authorization code for this payment is 482913',
     'Authorization code 884211 for your purchase',
     'Compra aprobada. Código de autorización 123456',
+    'Authorization code 884211 for your purchase on 12/05/2026',
+    'Authorization code 884211 for your purchase at 10:30',
+    'Purchase approved 12.05.2026. Auth code 884211',
+    'Approved transaction. Auth code 884211, ref 5521',
+    'Approved transaction. Auth code 884211 REF 5521',
+    'Your authorization code of 884211 is for this payment',
+    'Compra aprobada. Código de autorización: 123456, válido por 5 minutos',
+    'Compra aprobada el 5 de mayo de 2026. Código de autorización 123456',
+    'Payment approved. Authorization code of 6 digits: 884211',
   ])('catches %j', (body) => {
     expect(looksLikeOneTimeCode(body)).toBe(true);
   });
@@ -137,6 +146,14 @@ describe('looksLikeOneTimeCode', () => {
     'Purchase of 25 USD at Shop, auth code 123456',
     'Approved 50 USD. Authorization code 884211',
     'Compra de 50 USD, codigo de autorizacion 123456',
+    'Purchase of $25 at Shop, auth code 123456',
+    'Paid 25 € at Shop. Auth code 123456',
+    'Compra por $ 150.000 aprobada, código de autorización 123456',
+    'Paid 19.99 at Shop on 12/05/2026, auth code 123456',
+    'Compra aprobada 150.000,50. Código de autorización 123456',
+    'Purchase of 2500 approved, auth code 123456',
+    'Compra por 150000 aprobada, código de autorización 123456',
+    'Pago de 1.500.000 aprobado, código de aprobación 123456',
   ])('lets %j through', (body) => {
     expect(looksLikeOneTimeCode(body)).toBe(false);
   });

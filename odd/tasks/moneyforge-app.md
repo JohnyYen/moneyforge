@@ -46,7 +46,7 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `0f80acd`.
+Review base for the next candidate: `991395a`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
@@ -56,6 +56,7 @@ Review base for the next candidate: `0f80acd`.
 - [x] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste input. Share input moved to T5. Commits: `599e7d8`, `ba5ea65`.
 - [x] T4.1 T4 hardening: verified review findings on one-time codes, number scanning, replays, lone transfer sides, reference keys, cross-currency pairs, field caps, purge, rule samples, keyed hashes, `secure_delete`, and `allowBackup`. Commits: `7b1a098`, `49a47f4`.
 - [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen, Android share target. Depends on an Android toolchain for build proof. Background capture must not open a second database connection: all access goes through the one queued `SqlDriver`, because a second connection would lose `PRAGMA foreign_keys` and `secure_delete` and escape the write queue that dedup relies on. Status: code complete; Kotlin never compiled; no Gradle build, no APK, no device run, user asked to install nothing yet.
+- [ ] T5.1 T5 review advisories: keep the queue on a read failure, guard extra removal, keep a consumed share from replaying after process death, require a real amount for the authorization code exemption, make drain independent of navigation.
 - [ ] T6 Planning: flexible budgets, recurring items, cash flow projection.
 - [ ] T7 Wealth: assets, asset cash flow, read-only on-chain balances.
 - [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy. Rule packs exclude samples. Backup must carry `rules.dedup_secret`, or every stored dedup key stops matching after a restore.
@@ -277,6 +278,21 @@ T5 evidence:
   - On a Play bundle, or any binary without the module, `requireOptionalNativeModule` returns null and `absentMessageCapture` makes everything inert. A deep link to `/rules/capture` redirects to `/rules`.
 - `.gitignore` has `android/`, which also matches `modules/message-capture/android`, so those sources were added with `git add -f`. They stay tracked, but a new file there is ignored until `.gitignore` gets `!modules/**/android/` and `!modules/**/android/**`.
 - Environment: text sent through this tool had `\uXXXX` escapes decoded into raw characters, so the Kotlin pattern and the fixture were rewritten from Python and checked to be ASCII.
+
+T5 review: `review: medium, approved by native review; advisories addressed in T5.1`.
+
+T5.1 done. Route: delegated direct; 2+ non-trivial files.
+
+T5.1 evidence:
+
+- RED: `pnpm test --testPathPatterns 'capture-host-flow|domain/message'`: 2 suites failed, 8 failed of 64, the flow suite with `Cannot find module`. The Kotlin fixes have no test and were never compiled.
+- GREEN: 13 rules suites, 432 tests passed. Full checks are recorded with T6.
+- Decisions:
+  - The queue treats only a missing file as empty. Any other read failure propagates, so `append`, `remove`, and `read` fail and leave the file. JSON that cannot be parsed moves to `message-capture-queue.corrupt.json`, the newest replacing an older one, so unreadable messages stay bounded. Nothing reads that file back.
+  - The receiver's `runCatching` absorbs an `append` failure, so that SMS stays only in the default SMS app, and JS `drainQueue` reads a failed read as empty until the next drain.
+  - A launch intent can replay after process death because Android saves it, so `takeSharedText` compares a SHA-256 digest of the text with a digest kept in preferences. `OnNewIntent` neither reads nor writes the digest, because a new intent cannot replay and writing it would lose the digest of the launch intent that can. Cost: launching the app by sharing the exact text of the last launch share opens nothing.
+  - `hasMoneyAmount` replaces counting numbers. Currency codes are a known list, because any 3 letters would pass `REF 5521`. An obscure currency with no decimals and no amount word therefore fails toward privacy. The authorization code digits are removed first, so `authorization code of 884211` cannot prove itself. `de 2026`, `por 5 minutos`, and `of 6 digits` do not count. A year-shaped amount such as `of 2000` beside an authorization code is dropped, on the same privacy side.
+  - `createCaptureHostFlow` drains on start and foreground with no navigation, takes a share as soon as it arrives, and opens the paste screen once the navigator is ready. If the key never appears, draining still works and only the share waits. `CaptureHost` uses the imperative `router`, so the flow is not rebuilt.
 
 ## Next step
 

@@ -3,6 +3,7 @@ package app.moneyforge.messagecapture
 import android.content.Context
 import android.util.AtomicFile
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.UUID
 import org.json.JSONArray
@@ -10,6 +11,7 @@ import org.json.JSONException
 import org.json.JSONObject
 
 private const val FILE_NAME = "message-capture-queue.json"
+private const val CORRUPT_FILE_NAME = "message-capture-queue.corrupt.json"
 private const val MAX_ENTRIES = 200
 private const val MAX_BYTES = 256 * 1024
 
@@ -67,14 +69,32 @@ internal object MessageQueue {
 
   private fun fileOf(context: Context) = AtomicFile(File(context.noBackupFilesDir, FILE_NAME))
 
-  private fun load(file: AtomicFile): JSONArray =
-    try {
-      JSONArray(String(file.readFully(), Charsets.UTF_8))
-    } catch (error: IOException) {
-      JSONArray()
+  /**
+   * Only a file that does not exist reads as empty. Any other read failure propagates, because
+   * the callers write what they load, and an empty array here would erase the queue.
+   */
+  private fun load(file: AtomicFile): JSONArray {
+    val bytes =
+      try {
+        file.readFully()
+      } catch (error: FileNotFoundException) {
+        return JSONArray()
+      }
+    return try {
+      JSONArray(String(bytes, Charsets.UTF_8))
     } catch (error: JSONException) {
+      moveAside(file)
       JSONArray()
     }
+  }
+
+  /** The newest unreadable file replaces an older one, so these cannot pile up with messages. */
+  private fun moveAside(file: AtomicFile) {
+    val corrupt = file.baseFile
+    if (!corrupt.renameTo(File(corrupt.parentFile, CORRUPT_FILE_NAME))) {
+      throw IOException("Could not move an unreadable capture queue aside")
+    }
+  }
 
   private fun store(file: AtomicFile, bytes: ByteArray) {
     val stream = file.startWrite()
