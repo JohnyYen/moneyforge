@@ -10,6 +10,7 @@ import { err, ok, type Result } from '@/shared/result';
 import { addDays, laterDay, type Day } from '../domain/calendar';
 import { planningError, type PlanningError } from '../domain/planning-error';
 import {
+  datesDue,
   MAX_ASK_DATES_PER_RUN,
   occurrenceFrom,
   validateRecurringFields,
@@ -18,7 +19,7 @@ import {
   type RecurringKind,
   type RecurringMode,
 } from '../domain/recurring';
-import { occurrencesBetween, type Schedule } from '../domain/schedule';
+import type { Schedule } from '../domain/schedule';
 import type { PlanningDeps, PlanningRepositories } from './ports';
 import { localNoonOf, todayOf } from './recorded-movements';
 
@@ -220,23 +221,18 @@ export function createRecurringUseCases({ store, clock, generateId }: PlanningDe
   /**
    * Returns how many steps failed. Later dates wait for a failed one and the marker stays on the
    * last date that exists, so nothing is lost and the projection never counts a date twice. Other
-   * items are not held up. An `ask` item keeps its latest dates when too many are due, and those
-   * before them are gone for good: an `auto` item only meets this after days away, so it is not
-   * capped, and `createItem` keeps it from a distant start.
+   * items are not held up. Only `ask` items are capped, see `datesDue`: an `auto` item only meets
+   * this after days away, and `createItem` keeps it from a distant start.
    */
   async function materializeItem(
     item: RecurringItem,
     today: Day,
     created: { pending: number; posted: number },
   ): Promise<number> {
-    const { materializedThrough, schedule } = item;
-    const from = materializedThrough ? addDays(materializedThrough, 1) : schedule.startOn;
-    const dates = occurrencesBetween(schedule, from, today);
-    const kept = item.mode === 'ask' ? dates.slice(-MAX_ASK_DATES_PER_RUN) : dates;
+    const { dates, capped } = datesDue(item, today);
     try {
-      for (const [index, dueOn] of kept.entries()) {
-        const capped = index === 0 && kept.length < dates.length;
-        const outcome = await materializeOne(item, dueOn, capped ? CAPPED_NOTE : null);
+      for (const [index, dueOn] of dates.entries()) {
+        const outcome = await materializeOne(item, dueOn, capped && index === 0 ? CAPPED_NOTE : null);
         if (outcome !== 'existing') created[outcome] += 1;
         await store.planning.markMaterialized(item.id, dueOn);
       }

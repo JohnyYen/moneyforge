@@ -9,6 +9,7 @@ import {
   type Budget,
   type Expense,
 } from './budget';
+import type { BudgetPeriod } from './period';
 
 const usd: Currency = { code: 'USD', name: 'Dollar', decimals: 2, symbol: '$', kind: 'fiat' };
 const cop: Currency = { code: 'COP', name: 'Peso', decimals: 2, symbol: '$', kind: 'fiat' };
@@ -207,7 +208,24 @@ describe('validateBudget', () => {
 
 describe('rolloverRestarts', () => {
   it('stays false for a change that leaves the carry alone', () => {
-    expect(rolloverRestarts(budget(), budget({ name: 'Other', categoryIds: ['x'] }))).toBe(false);
+    expect(rolloverRestarts(budget(), budget({ name: 'Other' }))).toBe(false);
+  });
+
+  it('sees the same categories in another order as unchanged', () => {
+    const before = budget({ categoryIds: ['a', 'b'] });
+    expect(rolloverRestarts(before, budget({ categoryIds: ['b', 'a'] }))).toBe(false);
+  });
+
+  it('reads an empty start day as the day it defaults to', () => {
+    const blank = budget({ period: { kind: 'monthly', startDay: null } });
+    expect(rolloverRestarts(blank, budget({ period: { kind: 'monthly', startDay: 1 } }))).toBe(false);
+  });
+
+  it('ignores keys another kind of period would have', () => {
+    const period = { kind: 'monthly', startDay: 5, startMonth: null } as BudgetPeriod;
+    expect(rolloverRestarts(budget({ period: { kind: 'monthly', startDay: 5 } }), budget({ period }))).toBe(
+      false,
+    );
   });
 
   it('sees the same period written in another key order as unchanged', () => {
@@ -221,6 +239,8 @@ describe('rolloverRestarts', () => {
     ['the period', { period: { kind: 'weekly', startDay: null } }],
     ['the start of the period', { period: { kind: 'monthly', startDay: 5 } }],
     ['rollover', { rollover: true }],
+    ['a category', { categoryIds: ['x'] }],
+    ['the currency', { currencyCode: 'EUR' }],
   ])('restarts on %s', (_, change) => {
     expect(rolloverRestarts(budget(), budget(change))).toBe(true);
   });

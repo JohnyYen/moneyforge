@@ -110,10 +110,27 @@ export function flowsOfOccurrence(
 ): ExpectedFlow[] {
   const { kind, accountId, toAccountId, amount, categoryId, description: label } = occurrence;
   if (kind === 'income') return [{ day, accountId, minor: amount, label, categoryId }];
-  const out = { day, accountId, minor: -amount, label, categoryId };
-  if (kind !== 'transfer' || !toAccountId) return [out];
-  if (!projected.has(accountId) || !projected.has(toAccountId)) return [];
-  return [out, { day, accountId: toAccountId, minor: amount, label, categoryId }];
+  if (kind === 'expense') return [{ day, accountId, minor: -amount, label, categoryId }];
+  if (!toAccountId || !projected.has(accountId) || !projected.has(toAccountId)) return [];
+  // No category: a transfer only moves money, so it never takes from a budget's reservation.
+  return [
+    { day, accountId, minor: -amount, label },
+    { day, accountId: toAccountId, minor: amount, label },
+  ];
+}
+
+/**
+ * Dates through `today` the next run stores. An `ask` item keeps its latest when too many are due,
+ * and those before them are gone for good. `capped` says some were dropped.
+ */
+export function datesDue(
+  { materializedThrough, mode, schedule }: RecurringItem,
+  today: Day,
+): { readonly dates: readonly Day[]; readonly capped: boolean } {
+  const from = materializedThrough ? addDays(materializedThrough, 1) : schedule.startOn;
+  const due = occurrencesBetween(schedule, from, today);
+  const dates = mode === 'ask' ? due.slice(-MAX_ASK_DATES_PER_RUN) : due;
+  return { dates, capped: dates.length < due.length };
 }
 
 /** What recurring items will do through `until`. Anything overdue counts as due today. */
@@ -131,9 +148,10 @@ export function recurringFlows(
   );
   for (const item of items) {
     if (!item.active) continue;
-    const { materializedThrough, schedule } = item;
-    const after = materializedThrough ? addDays(materializedThrough, 1) : schedule.startOn;
-    for (const dueOn of occurrencesBetween(schedule, after, until)) {
+    const { dates } = datesDue(item, today);
+    const tomorrow = addDays(today, 1);
+    const after = laterDay(tomorrow, addDays(item.materializedThrough ?? today, 1));
+    for (const dueOn of [...dates, ...occurrencesBetween(item.schedule, after, until)]) {
       const occurrence = occurrenceFrom(item, dueOn, '');
       flows.push(...flowsOfOccurrence(occurrence, laterDay(dueOn, today), projected));
     }

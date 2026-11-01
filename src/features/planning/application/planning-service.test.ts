@@ -12,6 +12,7 @@ import type { Schedule } from '../domain/schedule';
 import type { BudgetInput } from './budget-use-cases';
 import type { ExpectedCashFlowSource } from './ports';
 import type { RecurringInput } from './recurring-use-cases';
+import { toBudgetDraft, toBudgetInput } from '../ui/plan-model';
 
 function unwrap<T>(result: Result<T, { code: string; message: string }>): T {
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
@@ -266,26 +267,54 @@ describe('planning', () => {
       expect(status?.available).toBe(170_00n);
     });
 
-    it('updates a budget, keeps its start, and replaces categories', async () => {
+    it('renames a budget and keeps its start', async () => {
+      const food = await category('expense', 'A');
+      const budget = unwrap(await services.planning.createBudget(budgetInput(food)));
+      now = localNoon('2026-04-01');
+      const updated = unwrap(
+        await services.planning.updateBudget(budget.id, budgetInput(food, { name: 'Renamed' })),
+      );
+
+      expect(updated.startsOn).toBe(TODAY);
+      expect(await services.planning.getBudget(budget.id)).toMatchObject({ name: 'Renamed' });
+    });
+
+    it('keeps what carried over through a save with nothing changed', async () => {
+      const bank = await account('Bank', 'USD', '1000');
+      const food = await category('expense');
+      const usd = await services.ledger.getBaseCurrency();
+      now = localNoon('2026-01-10');
+      const budget = unwrap(
+        await services.planning.createBudget(budgetInput(food, { rollover: true })),
+      );
+      await expense(bank, '30', '2026-01-20', food);
+      now = localNoon('2026-03-10');
+      const stored = await services.planning.getBudget(budget.id);
+      if (!stored || !usd) throw new Error('Missing test data');
+
+      const input = toBudgetInput(toBudgetDraft(stored, usd));
+      const saved = unwrap(await services.planning.updateBudget(budget.id, input));
+
+      expect(saved.startsOn).toBe('2026-01-10');
+      expect((await statusOf(budget.id))?.carried).toBe(170_00n);
+    });
+
+    it('replaces the categories and restarts what carried over', async () => {
       const food = await category('expense', 'A');
       const fun = await category('expense', 'B');
       const budget = unwrap(await services.planning.createBudget(budgetInput(food)));
       now = localNoon('2026-04-01');
-      const updated = unwrap(
-        await services.planning.updateBudget(budget.id, budgetInput(fun, { name: 'Renamed' })),
-      );
+      const updated = unwrap(await services.planning.updateBudget(budget.id, budgetInput(fun)));
 
-      expect(updated.startsOn).toBe(TODAY);
-      expect(await services.planning.getBudget(budget.id)).toMatchObject({
-        name: 'Renamed',
-        categoryIds: [fun],
-      });
+      expect(updated.startsOn).toBe('2026-04-01');
+      expect(await services.planning.getBudget(budget.id)).toMatchObject({ categoryIds: [fun] });
     });
 
     it.each<[string, Partial<BudgetInput>]>([
       ['amount', { amount: '200' }],
       ['period', { period: { kind: 'monthly', startDay: 15 } }],
       ['rollover', { rollover: false }],
+      ['currency', { currencyCode: 'EUR' }],
     ])('restarts what carried over when the %s changes', async (_, change) => {
       const bank = await account('Bank', 'USD', '1000');
       const food = await category('expense');
@@ -1101,6 +1130,33 @@ describe('planning', () => {
       ]);
       expect(projection.accounts[0].firstNegativeOn).toBe(addDays(TODAY, 3));
       expect(projection.total.firstNegativeOn).toBe(addDays(TODAY, 3));
+    });
+
+    it('leaves out dates the cap will drop, before they are ever materialized', async () => {
+      const bank = await account('Bank', 'USD', '1000');
+      unwrap(
+        await services.planning.createItem(
+          recurringInput(bank, { amount: '1', schedule: daily({ startOn: '2016-03-10' }) }),
+        ),
+      );
+
+      const projection = unwrap(await services.planning.projectCashFlow(horizon));
+      expect(projection.accounts[0].balances[0]).toBe(940_00n);
+      expect(projection.accounts[0].balances[5]).toBe(935_00n);
+    });
+
+    it('leaves out capped dates while the first kept date cannot be stored', async () => {
+      const bank = await account('Bank', 'USD', '1000');
+      unwrap(
+        await services.planning.createItem(
+          recurringInput(bank, { amount: '1', schedule: daily({ startOn: '2016-03-10' }) }),
+        ),
+      );
+      const failing = servicesOn(failingOn(driver, /INSERT INTO recurring_occurrences/));
+      expect((await failing.planning.materializeDue()).failed).toBe(1);
+
+      const projection = unwrap(await services.planning.projectCashFlow(horizon));
+      expect(projection.accounts[0].balances[0]).toBe(940_00n);
     });
 
     it('does not count an already posted occurrence twice', async () => {

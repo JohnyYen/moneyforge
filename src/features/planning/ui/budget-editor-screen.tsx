@@ -143,7 +143,7 @@ function BudgetForm({
       />
       <Muted>With rollover, what is left or overspent carries into the next period.</Muted>
       {onArchive ? (
-        <Muted>Changing the amount, period, or rollover starts the carry again from zero.</Muted>
+        <Muted>Changing the amount, currency, categories, period, or rollover starts the carry again from zero.</Muted>
       ) : null}
       <ErrorBanner message={error} />
       <Button label="Save" disabled={submitting} onPress={() => onSubmit(draft)} />

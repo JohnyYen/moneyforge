@@ -61,6 +61,21 @@ describe('flows', () => {
     expect(flow('expense').map(({ minor }) => minor)).toEqual([-10_00n]);
   });
 
+  it('never lets a transfer read as spending in a category', () => {
+    const occurrence = {
+      ...occurrenceFrom(item({ kind: 'transfer', toAccountId: 'b' }), '2026-03-11', 'o1'),
+      categoryId: 'food',
+    };
+    const flows = flowsOfOccurrence(occurrence, '2026-03-11', new Set(['a', 'b']));
+    expect(flows).toHaveLength(2);
+    expect(flows.every(({ categoryId }) => !categoryId)).toBe(true);
+  });
+
+  it('keeps the category of an expense', () => {
+    const occurrence = { ...occurrenceFrom(item(), '2026-03-11', 'o1'), categoryId: 'food' };
+    expect(flowsOfOccurrence(occurrence, '2026-03-11', new Set(['a']))[0].categoryId).toBe('food');
+  });
+
   it('moves a transfer between its accounts and leaves the total alone', () => {
     expect(flow('transfer', 'b').map(({ accountId, minor }) => [accountId, minor])).toEqual([
       ['a', -10_00n],

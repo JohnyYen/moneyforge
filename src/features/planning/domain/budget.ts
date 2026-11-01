@@ -72,7 +72,20 @@ export function belongsTo(
   return false;
 }
 
-const periodKey = (period: BudgetPeriod) => JSON.stringify(Object.entries(period).sort());
+/** What a period means, so a blank start and the day it defaults to read as one. */
+function periodKey(period: BudgetPeriod): string {
+  switch (period.kind) {
+    case 'weekly':
+    case 'monthly':
+      return `${period.kind}:${period.startDay ?? 1}`;
+    case 'yearly':
+      return `yearly:${period.startMonth ?? 1}:${period.startDay ?? 1}`;
+    case 'custom':
+      return `custom:${period.startOn}:${period.lengthDays}`;
+  }
+}
+
+const categoriesKey = ({ categoryIds }: Budget) => [...new Set(categoryIds)].sort().join();
 
 /**
  * True when what carried over no longer means what it did: past periods would be recomputed with
@@ -81,8 +94,10 @@ const periodKey = (period: BudgetPeriod) => JSON.stringify(Object.entries(period
 export function rolloverRestarts(before: Budget, after: Budget): boolean {
   return (
     before.amount !== after.amount ||
+    before.currencyCode !== after.currencyCode ||
     before.rollover !== after.rollover ||
-    periodKey(before.period) !== periodKey(after.period)
+    periodKey(before.period) !== periodKey(after.period) ||
+    categoriesKey(before) !== categoriesKey(after)
   );
 }
 
