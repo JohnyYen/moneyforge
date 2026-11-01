@@ -3,7 +3,7 @@ import type { SqlExecutor, SqlValue } from '@/shared/persistence/sql-driver';
 import type { LedgerRepositories, LedgerStore, TransactionFilter } from '../application/ports';
 import type { Account, SystemRole } from '../domain/account';
 import type { Category, CategoryKind } from '../domain/category';
-import type { Currency, CurrencyKind } from '../domain/currency';
+import type { Currency } from '../domain/currency';
 import { isBalanced, type Transaction, type TransactionKind } from '../domain/journal';
 
 type AccountRow = {
