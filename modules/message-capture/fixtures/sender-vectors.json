@@ -1,0 +1,21 @@
+[
+  {"raw": "  BankCo ", "normalized": "bankco"},
+  {"raw": "+57 (300) 123-4567", "normalized": "+573001234567"},
+  {"raw": "BANK.CO", "normalized": "bankco"},
+  {"raw": "   ", "normalized": ""},
+  {"raw": "Bank2", "normalized": "bank2"},
+  {"raw": "tab\tnew\nline\rend", "normalized": "tabnewlineend"},
+  {"raw": "vertical\u000bform\ffeed", "normalized": "verticalformfeed"},
+  {"raw": "no\u00a0break", "normalized": "nobreak"},
+  {"raw": "ogham\u1680mark", "normalized": "oghammark"},
+  {"raw": "em\u2003space", "normalized": "emspace"},
+  {"raw": "line\u2028para\u2029end", "normalized": "lineparaend"},
+  {"raw": "narrow\u202fmath\u205fwide\u3000end", "normalized": "narrowmathwideend"},
+  {"raw": "\ufeffBOM", "normalized": "bom"},
+  {"raw": "under_score", "normalized": "under_score"},
+  {"raw": "en\u2013dash", "normalized": "en\u2013dash"},
+  {"raw": "zero\u200bwidth", "normalized": "zero\u200bwidth"},
+  {"raw": "BANCOLOMBIA", "normalized": "bancolombia"},
+  {"raw": "\u00d1AND\u00da", "normalized": "\u00f1and\u00fa"},
+  {"raw": "\u0391\u03a3", "normalized": "\u03b1\u03c2"}
+]

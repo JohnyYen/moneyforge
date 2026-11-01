@@ -10,7 +10,7 @@ function resolveVariant(value: string | undefined) {
   if (variantName !== 'play' && variantName !== 'full') {
     throw new Error(`Unknown APP_VARIANT: ${variantName}`);
   }
-  return variants[variantName];
+  return { variantName, ...variants[variantName] };
 }
 
 export default function createConfig({ config }: ConfigContext): ExpoConfig {
@@ -48,6 +48,7 @@ export default function createConfig({ config }: ConfigContext): ExpoConfig {
           imageWidth: 76,
         },
       ],
+      ['./plugins/with-message-capture', { variant: variant.variantName }],
     ],
     experiments: {
       typedRoutes: true,
