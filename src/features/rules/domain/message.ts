@@ -71,13 +71,17 @@ const ONE_TIME_WORDS =
 const CODE_WORDS = /\b(?:codes?|c[oó]digo|pin|token|clave)\b/i;
 const DIGIT_CODE = /\b[0-9]{4,8}\b/;
 const BARE_CODE = /^[a-z]{0,2}-?[0-9]{4,8}\.?$/i;
-// A purchase notice names these, so they say nothing about a one-time code.
+// A purchase notice names these, so only there do they say nothing about a one-time code.
 const AUTHORIZATION_CODE =
   /\b(?:auth(?:orization)?|approval) codes?\b|\bc[oó]digos? de (?:autorizaci[oó]n|aprobaci[oó]n)\b/gi;
+const PURCHASE_CONTEXT =
+  /\b(?:purchase|paid|payment|charged|approved|transaction|compra|pago|cargo|aprobad[ao]|transacci[oó]n)\b/i;
+const DO_NOT_SHARE = /\b(?:do not|don'?t|never) share\b|\bno (?:lo |la )?compart[ai]s?\b/i;
 
 export function looksLikeOneTimeCode(body: string): boolean {
   const text = normalizeBody(body);
   if (ONE_TIME_WORDS.test(text) || BARE_CODE.test(text)) return true;
-  const rest = text.replace(AUTHORIZATION_CODE, ' ');
+  if (DO_NOT_SHARE.test(text) && DIGIT_CODE.test(text)) return true;
+  const rest = PURCHASE_CONTEXT.test(text) ? text.replace(AUTHORIZATION_CODE, ' ') : text;
   return CODE_WORDS.test(rest) && DIGIT_CODE.test(rest);
 }

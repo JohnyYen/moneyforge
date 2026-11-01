@@ -116,6 +116,11 @@ describe('looksLikeOneTimeCode', () => {
     'passcode: 991122',
     'Your OTP 482913 for purchase of 250 USD at Amazon',
     'Authentication code 553311',
+    'Your auth code is 482913',
+    'Your authorization code is 482913. Do not share it',
+    'Approval code 553311',
+    'Tu código de autorización es 482913',
+    'Authorization code 884211 for your purchase. Do not share it',
   ])('catches %j', (body) => {
     expect(looksLikeOneTimeCode(body)).toBe(true);
   });
