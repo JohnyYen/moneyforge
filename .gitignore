@@ -17,3 +17,5 @@ expo-env.d.ts
 *.pem
 *.tsbuildinfo
 .DS_Store
+!modules/**/android/
+!modules/**/android/**
