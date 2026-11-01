@@ -248,6 +248,7 @@ export async function postItem(
     transactionId: transaction.value.id,
   } as const;
   const split = await applySplitMode(context, item, transaction.value);
+  if (item.ruleId) await repositories.postHook.afterPost(item.ruleId, transaction.value);
   const updated: InboxItem = { ...item, ...posted, ...split };
   await repositories.rules.saveItem(updated);
   if (partner) await repositories.rules.saveItem({ ...partner, ...posted });

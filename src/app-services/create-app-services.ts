@@ -1,3 +1,9 @@
+import { createAssetService } from '@/features/assets/application/asset-service';
+import {
+  assetCurrencyUsage,
+  assetRulePostHook,
+  createSqliteAssetStore,
+} from '@/features/assets/infrastructure/sqlite-asset-store';
 import { createLedgerService } from '@/features/ledger/application/ledger-service';
 import type { Clock, IdGenerator } from '@/features/ledger/application/ports';
 import {
@@ -12,7 +18,10 @@ import {
   planningCurrencyUsage,
 } from '@/features/planning/infrastructure/sqlite-planning-store';
 import type { SecretGenerator } from '@/features/rules/application/ports';
-import { createSqliteLedgerStore } from '@/features/ledger/infrastructure/sqlite-ledger-store';
+import {
+  createSqliteLedgerStore,
+  type CurrencyUsageFactory,
+} from '@/features/ledger/infrastructure/sqlite-ledger-store';
 import { createRulesService } from '@/features/rules/application/rules-service';
 import { createSqliteRuleStore } from '@/features/rules/infrastructure/sqlite-rule-store';
 import { createSplitService } from '@/features/split/application/split-service';
@@ -21,6 +30,13 @@ import {
   splitChangeGuard,
 } from '@/features/split/infrastructure/sqlite-split-store';
 import type { SqlExecutor } from '@/shared/persistence/sql-driver';
+
+const currencyUsage: CurrencyUsageFactory = (sql) => {
+  const [planning, assets] = [planningCurrencyUsage(sql), assetCurrencyUsage(sql)];
+  return {
+    isInUse: async (code) => (await planning.isInUse(code)) || assets.isInUse(code),
+  };
+};
 
 /** The one place that knows which features exist and how they depend on each other. */
 export function createAppServices(deps: {
@@ -33,7 +49,7 @@ export function createAppServices(deps: {
 }) {
   const { driver, clock, generateId, generateSecret } = deps;
   const rules = createRulesService({
-    store: createSqliteRuleStore(driver),
+    store: createSqliteRuleStore(driver, assetRulePostHook),
     clock,
     generateId,
     generateSecret,
@@ -44,9 +60,10 @@ export function createAppServices(deps: {
     port: deps.messageCapture ?? absentMessageCapture,
     rules,
   });
+  const assets = createAssetService({ store: createSqliteAssetStore(driver), clock, generateId });
   return {
     ledger: createLedgerService({
-      store: createSqliteLedgerStore(driver, splitChangeGuard, planningCurrencyUsage),
+      store: createSqliteLedgerStore(driver, splitChangeGuard, currencyUsage),
       clock,
       generateId,
     }),
@@ -55,8 +72,9 @@ export function createAppServices(deps: {
       store: createSqlitePlanningStore(driver),
       clock,
       generateId,
-      expectedSources: deps.expectedSources,
+      expectedSources: [assets.expectedSource, ...(deps.expectedSources ?? [])],
     }),
+    assets,
     rules,
     capture,
   };

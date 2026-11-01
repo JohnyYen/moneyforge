@@ -1,4 +1,5 @@
 import type { Clock, IdGenerator } from '@/features/ledger/application/ports';
+import type { Transaction } from '@/features/ledger/domain/journal';
 import type { SplitRepositories } from '@/features/split/application/ports';
 
 import type { InboxItem } from '../domain/inbox-item';
@@ -34,8 +35,17 @@ export interface RuleRepository {
   purgeUnresolvedBefore(cutoff: string): Promise<number>;
 }
 
+/**
+ * Lets another feature act on what a rule posted, in the same write. Runs inside the transaction,
+ * so it must only await database work, and a failure takes the posting down with it.
+ */
+export interface RulePostHook {
+  afterPost(ruleId: string, transaction: Transaction): Promise<void>;
+}
+
 export interface RuleRepositories extends SplitRepositories {
   readonly rules: RuleRepository;
+  readonly postHook: RulePostHook;
 }
 
 export interface RuleStore extends RuleRepositories {
