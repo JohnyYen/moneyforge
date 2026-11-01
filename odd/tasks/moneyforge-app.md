@@ -46,12 +46,12 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `fa3305f`.
+Review base for the next candidate: `4834039`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
 - [x] T2.1 Ledger hardening: verified T2 defects (amount entry, rollback recovery, posting load paging, currency decimals, conversion consistency, double submit, queue re-entrancy, same-day rate test, foreign key check) plus editing and deleting transactions. Commits: `1ed15f4`, `f6d34bd`.
-- [ ] T3 Income split: structures, percentages, pending move tasks, screens.
+- [x] T3 Income split: structures, percentages, pending move tasks, screens. Commits: `caf80e7`, `20ac32f`.
 - [ ] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste and share input.
 - [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen. Depends on an Android toolchain for build proof.
 - [ ] T6 Planning: flexible budgets, recurring items, cash flow projection.
@@ -121,7 +121,32 @@ T2.1 evidence:
   - After a failed ROLLBACK the driver raises `TransactionRollbackError`, retries before the next operation, and runs nothing until that succeeds. "No transaction is active" is matched by message and counts as rolled back.
   - `useSubmit` takes `exitsOnSuccess`, and the gate stays closed after success on screens that leave. Screens that stay reopen it.
   - Opening entries cannot be edited or deleted here; reconciliations can be deleted but not edited. An edit may keep an account or category archived since, and may change the kind. Metadata is rebuilt by the factories.
+- review: high, declined by the user for this candidate; independent verifier ran.
+
+T3 done. Route: delegated direct; 2+ non-trivial files.
+
+T3 evidence:
+
+- RED, domain: 5 suites failed with `Cannot find module`, and 4 `deriveRate` tests failed of 24. RED, application and storage: 2 suites failed on missing modules. RED, UI models: 2 suites failed on missing modules.
+- GREEN: `pnpm test`: 26 suites, 319 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `pnpm expo export --platform android`: exit 0, one 2.9 MB Hermes bundle.
+- Tests cover allocations summing exactly (1 to 8 lines, 200 rounds each, across 0 to 18 decimals, seeded), balanced journals from completed transfers and conversions, double apply including a concurrent one, rollback mid-completion and mid-undo, snapshots surviving structure edits, and the edit and delete guards in both directions.
+- Rollback tests had no behavioral RED because the modules did not exist yet. Making the split store's `atomic` run without a transaction failed exactly the 2 rollback tests and the concurrent apply test, which proves they cover it.
+- Not run: no device run, Gradle build, or screen rendering test. Every split screen, `useConfirmedSubmit`, the `Alert` confirmations, `app-services-provider`, and migration 002 under `expo-sqlite` are compiled, never executed. Migration 002 did run on `node:sqlite`, but only on a fresh database, not on an existing version 1 database with data.
+- Decisions:
+  - The ledger stays unaware of splits. It exposes a `TransactionChangeGuard` port, bound to the transaction through `LedgerRepositories.changeGuard`, and `src/app-services` wires the split guard in. `open-ledger.ts` moved there as `open-app-services.ts`. Screens take slots (`header`, `onRecorded`, `renderFooter`), and split composes them in `ledger-screens.tsx`.
+  - A guard that needs consent returns `confirmation-required`, and the caller retries with `{ confirmed: true }`. A refusal must happen before any write, because a returned error commits.
+  - Only amount, account, and kind count as material on an income with a run, compared through its postings. Description, date, and category stay editable, with no cancellation.
+  - Skipped moves count as not done, so an income whose moves are all pending or skipped can be canceled after confirmation. Canceling deletes the run, so a new one can be applied.
+  - Beyond the brief: a linked transfer or conversion may change amount, fee, date, and description, but not its accounts or kind, because that would leave a done move describing something else. `undoMove` also returns a skipped move to pending, so a mistaken skip is not permanent.
+  - The remainder line goes through largest remainder like any other line, with its exact share as the percentage, so it does not absorb all rounding.
+  - A conversion needs the received amount; an empty rate is derived by the new `deriveRate`, rounded to 12 decimals (more for tiny rates). That rounding stays inside the tolerance of `isConsistentConversion`. A stated rate that disagrees is rejected.
+  - A category default wins over an account default. Defaults on archived structures are ignored, not deleted.
+  - Applying and completing respect archives: a run is rejected if a target is archived, and a pending move whose account was archived later cannot be completed until the account is restored, though it can be skipped.
+  - The count on the main tab is a row at the top of the Accounts screen, shown when any move is pending, not a badge on the tab. The tab layout gets no focus events, so a badge would go stale.
 
 ## Next step
 
-T3 Income split. Run the ledger on a device or emulator when a toolchain exists.
+T4 Rules engine. Run the ledger and split screens on a device or emulator when a toolchain exists, including migration 002 over an existing database.
