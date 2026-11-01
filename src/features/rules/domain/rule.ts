@@ -6,7 +6,7 @@ import { err, ok, type Result } from '@/shared/result';
 import { MAX_MESSAGE_LENGTH, normalizeBody } from './message';
 import { isValidNumberFormat, parseAmountText, type NumberFormat } from './number-format';
 import { ruleError, type RuleError } from './rule-error';
-import { compileTemplate, matchTemplate } from './template';
+import { compileTemplate, matchTemplate, MAX_FIELD_LENGTH } from './template';
 
 export const RULE_KINDS = ['income', 'expense', 'transfer_out', 'transfer_in'] as const;
 export type RuleKind = (typeof RULE_KINDS)[number];
@@ -119,6 +119,9 @@ export function evaluateRule(rule: Rule, text: string, lookups: RuleLookups): Ru
     return failed(`The message is in ${code}, but the account uses ${account.currencyCode}.`);
   }
 
+  if (amount.length > MAX_FIELD_LENGTH) {
+    return failed(`The amount is over ${MAX_FIELD_LENGTH} characters.`);
+  }
   const plain = parseAmountText(amount, rule.format);
   if (plain === null) return failed(`Cannot read the amount "${amount}" with this number format.`);
   const amountMinor = parseDecimal(plain, known.decimals);

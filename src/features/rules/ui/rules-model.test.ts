@@ -16,6 +16,7 @@ import {
   ruleDraftFromItem,
   sampleResults,
   settingsDraftFor,
+  templateCopyWarning,
   templateProblem,
   toItemDraft,
   toRuleInput,
@@ -67,6 +68,29 @@ const item = (over: Partial<InboxItem> = {}): InboxItem => ({
   ...over,
 });
 
+describe('templateCopyWarning', () => {
+  const message = 'Paid 10.50 USD at Acme Hardware Store. Card 1234';
+
+  it('warns when the template still holds the message', () => {
+    expect(templateCopyWarning(message, message)).toContain('Acme Hardware Store');
+  });
+
+  it('warns about values left in fixed text', () => {
+    expect(templateCopyWarning('Paid {amount} USD at {counterparty}. Card 1234', message)).toContain(
+      'Card 1234',
+    );
+  });
+
+  it('accepts short wording shared with the message', () => {
+    expect(templateCopyWarning('Paid {amount} USD at {counterparty}. Card {*}', message)).toBeNull();
+  });
+
+  it('accepts fixed text that is not in the message, or no message at all', () => {
+    expect(templateCopyWarning('Spent 1234 {amount} on stuff in the store', message)).toBeNull();
+    expect(templateCopyWarning(message, null)).toBeNull();
+  });
+});
+
 describe('rule draft', () => {
   const ready = {
     ...emptyRuleDraft('s1'),
@@ -100,11 +124,11 @@ describe('rule draft', () => {
     ).toMatchObject({ counterpartAccountId: 'b', categoryId: null });
   });
 
-  it('starts from a message, escaped and kept as a sample', () => {
+  it('starts from a message, escaped, and never turns it into a sample', () => {
     expect(ruleDraftFromItem(item({ body: 'Ref {1}' }))).toMatchObject({
       sourceId: 's1',
       template: 'Ref {{1}}',
-      samples: ['Ref {1}'],
+      samples: [''],
     });
   });
 
@@ -222,8 +246,8 @@ describe('labels', () => {
 
 describe('settings draft', () => {
   it('round-trips and leaves an unreadable number for validation to refuse', () => {
-    const draft = settingsDraftFor({ retentionDays: 30, dedupWindowHours: 24, transferWindowHours: 72 });
-    expect(toSettings(draft)).toEqual({ retentionDays: 30, dedupWindowHours: 24, transferWindowHours: 72 });
+    const draft = settingsDraftFor({ retentionDays: 30, dedupWindowMinutes: 24, transferWindowHours: 72 });
+    expect(toSettings(draft)).toEqual({ retentionDays: 30, dedupWindowMinutes: 24, transferWindowHours: 72 });
     expect(toSettings({ ...draft, retentionDays: 'x' }).retentionDays).toBeNaN();
   });
 });

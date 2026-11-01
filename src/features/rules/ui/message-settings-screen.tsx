@@ -45,12 +45,12 @@ function SettingsForm({
       {field(
         'Keep unresolved messages (days)',
         'retentionDays',
-        'Older messages you have not handled are deleted. Handled messages lose their text at once.',
+        'Older messages with no rule are deleted, and older pending items lose their text. Handled messages lose their text at once.',
       )}
       {field(
-        'Duplicate window (hours)',
-        'dedupWindowHours',
-        'A message with no reference counts as a copy if the same text arrived within this time.',
+        'Duplicate window (minutes)',
+        'dedupWindowMinutes',
+        'A message with no reference is always held for review if its text arrived before. Within this time it is called a likely copy.',
       )}
       {field(
         'Transfer window (hours)',

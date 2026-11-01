@@ -2,7 +2,7 @@ import type { Account } from '@/features/ledger/domain/account';
 import { err, ok, type Result } from '@/shared/result';
 
 import type { InboxItem } from '../domain/inbox-item';
-import { normalizeReference } from '../domain/message';
+import { referenceKeyFor } from '../domain/message';
 import {
   SETTING_KEYS,
   validateSettings,
@@ -12,6 +12,7 @@ import { evaluateRule, validateRule, type Rule } from '../domain/rule';
 import { ruleError, type RuleError } from '../domain/rule-error';
 import { createMessageSource, type MessageSource } from '../domain/source';
 import {
+  loadDedupSecret,
   loadLookups,
   loadMessageSettings,
   placeItem,
@@ -110,7 +111,12 @@ async function writeSource(
 }
 
 /** Runs a new rule on the item it was built from, as if the message had just arrived. */
-async function rematchItem(context: FlowContext, item: InboxItem, rule: Rule): Promise<void> {
+async function rematchItem(
+  context: FlowContext,
+  item: InboxItem,
+  rule: Rule,
+  secret: string,
+): Promise<void> {
   const { repositories } = context;
   const { rules } = repositories;
   if (item.status !== 'unmatched' || !item.body || item.sourceId !== rule.sourceId) return;
@@ -119,16 +125,21 @@ async function rematchItem(context: FlowContext, item: InboxItem, rule: Rule): P
     await rules.saveItem({ ...item, note: evaluation.reason });
     return;
   }
-  const referenceKey = normalizeReference(evaluation.fields.reference);
+  const referenceKey = referenceKeyFor(rule.kind, evaluation.fields.reference, secret);
   const taken = referenceKey && (await rules.findItemByReference(rule.sourceId, referenceKey));
   // The reference says this may be a message already handled, so a person decides.
   const proposal = taken
-    ? { ...withProposal(item, rule, evaluation.fields, null), autoPost: false }
+    ? {
+        ...withProposal(item, rule, evaluation.fields, null),
+        autoPost: false,
+        note: 'Possible repeat: this reference was already handled.',
+      }
     : withProposal(item, rule, evaluation.fields, referenceKey);
   await placeItem(context, proposal, await loadMessageSettings(repositories.settings));
 }
 
-export function createRuleUseCases({ store, clock, generateId }: RuleDeps) {
+export function createRuleUseCases(deps: RuleDeps) {
+  const { store, clock, generateId } = deps;
   return {
     listSources: () => store.rules.listSources(),
     getSource: (id: string) => store.rules.getSource(id),
@@ -146,17 +157,19 @@ export function createRuleUseCases({ store, clock, generateId }: RuleDeps) {
     getRule: (id: string) => store.rules.getRule(id),
 
     /** With `fromItemId`, the new rule also runs on that item. */
-    createRule: (
+    createRule: async (
       input: RuleInput,
       { fromItemId }: { readonly fromItemId?: string } = {},
-    ): Promise<RuleResult<Rule>> =>
-      store.atomic(async (repositories) => {
+    ): Promise<RuleResult<Rule>> => {
+      const secret = fromItemId ? await loadDedupSecret(deps) : null;
+      return store.atomic(async (repositories) => {
         const rule = await writeRule(repositories, { ...input, id: generateId() }, null);
-        if (!rule.ok || !fromItemId) return rule;
+        if (!rule.ok || !fromItemId || !secret) return rule;
         const item = await repositories.rules.getItem(fromItemId);
-        if (item) await rematchItem({ repositories, clock, generateId }, item, rule.value);
+        if (item) await rematchItem({ repositories, clock, generateId }, item, rule.value, secret);
         return rule;
-      }),
+      });
+    },
 
     updateRule: (input: Rule): Promise<RuleResult<Rule>> =>
       store.atomic(async (repositories) => {
@@ -179,7 +192,7 @@ export function createRuleUseCases({ store, clock, generateId }: RuleDeps) {
         const valid = validateSettings(input);
         if (!valid.ok) return valid;
         await settings.set(SETTING_KEYS.retentionDays, String(input.retentionDays));
-        await settings.set(SETTING_KEYS.dedupWindowHours, String(input.dedupWindowHours));
+        await settings.set(SETTING_KEYS.dedupWindowMinutes, String(input.dedupWindowMinutes));
         await settings.set(SETTING_KEYS.transferWindowHours, String(input.transferWindowHours));
         return valid;
       }),

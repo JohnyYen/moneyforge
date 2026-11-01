@@ -184,6 +184,48 @@ describe('sqlite rule repository', () => {
     expect(candidates.map(({ id }) => id).sort()).toEqual(['solo', 'waiting']);
   });
 
+  it('offers every unpaired side at any distance, and sides held for review', async () => {
+    const side = { ...item, kind: 'transfer_in', referenceKey: null, status: 'waiting_pair' } as const;
+    await repository.saveItem({ ...side, id: 'far', receivedAt: '2020-01-01T00:00:00.000Z' });
+    await repository.saveItem({ ...side, id: 'held', status: 'proposed' });
+    await repository.saveItem({ ...side, id: 'paired', status: 'proposed', pairItemId: 'far' });
+    await repository.saveItem({ ...side, id: 'gone', status: 'posted', body: null });
+
+    const sides = await repository.listUnpairedSides('transfer_in');
+
+    expect(sides.map(({ id }) => id).sort()).toEqual(['far', 'held']);
+  });
+
+  describe('purge', () => {
+    const CUTOFF = '2026-03-11T00:00:00.000Z';
+    const unmatched = { ...item, referenceKey: null, kind: null, amountMinor: null, status: 'unmatched' } as const;
+
+    it('deletes unmatched rows only, and erases the text of older items with money', async () => {
+      await repository.saveItem({ ...unmatched, id: 'old' });
+      await repository.saveItem({ ...unmatched, id: 'young', receivedAt: '2026-03-12T00:00:00.000Z' });
+      await repository.saveItem({ ...item, id: 'pending' });
+      await repository.saveItem({ ...item, id: 'side', referenceKey: null, status: 'waiting_pair' });
+
+      await expect(repository.purgeUnresolvedBefore(CUTOFF)).resolves.toBe(3);
+
+      await expect(repository.getItem('old')).resolves.toBeNull();
+      await expect(repository.getItem('young')).resolves.toMatchObject({ body: 'Got 1' });
+      await expect(repository.getItem('pending')).resolves.toMatchObject({
+        body: null,
+        bodyHash: 'hash',
+        referenceKey: 'REF',
+        amountMinor: HUGE,
+      });
+      await expect(repository.getItem('side')).resolves.toMatchObject({ body: null });
+    });
+
+    it('leaves a resolved item alone', async () => {
+      await repository.saveItem({ ...item, status: 'rejected', body: null });
+      await expect(repository.purgeUnresolvedBefore(CUTOFF)).resolves.toBe(0);
+      await expect(repository.getItem('i1')).resolves.not.toBeNull();
+    });
+  });
+
   it('lists open items and posted ones with a split still wanted', async () => {
     await repository.saveItem({ ...item, referenceKey: null, id: 'open' });
     await repository.saveItem({

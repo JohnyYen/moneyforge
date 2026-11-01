@@ -1,5 +1,6 @@
 import { createLedgerService } from '@/features/ledger/application/ledger-service';
 import type { Clock, IdGenerator } from '@/features/ledger/application/ports';
+import type { SecretGenerator } from '@/features/rules/application/ports';
 import { createSqliteLedgerStore } from '@/features/ledger/infrastructure/sqlite-ledger-store';
 import { createRulesService } from '@/features/rules/application/rules-service';
 import { createSqliteRuleStore } from '@/features/rules/infrastructure/sqlite-rule-store';
@@ -15,8 +16,9 @@ export function createAppServices(deps: {
   readonly driver: SqlExecutor;
   readonly clock: Clock;
   readonly generateId: IdGenerator;
+  readonly generateSecret: SecretGenerator;
 }) {
-  const { driver, clock, generateId } = deps;
+  const { driver, clock, generateId, generateSecret } = deps;
   return {
     ledger: createLedgerService({
       store: createSqliteLedgerStore(driver, splitChangeGuard),
@@ -24,7 +26,12 @@ export function createAppServices(deps: {
       generateId,
     }),
     split: createSplitService({ store: createSqliteSplitStore(driver), clock, generateId }),
-    rules: createRulesService({ store: createSqliteRuleStore(driver), clock, generateId }),
+    rules: createRulesService({
+      store: createSqliteRuleStore(driver),
+      clock,
+      generateId,
+      generateSecret,
+    }),
   };
 }
 

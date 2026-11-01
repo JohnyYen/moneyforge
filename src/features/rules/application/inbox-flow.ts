@@ -11,6 +11,7 @@ import { err, ok, type Result } from '@/shared/result';
 
 import { pairingKind, pickPair, type InboxItem } from '../domain/inbox-item';
 import {
+  DEDUP_SECRET_KEY,
   DEFAULT_MESSAGE_SETTINGS,
   hoursToMs,
   readSetting,
@@ -19,7 +20,7 @@ import {
 } from '../domain/message-settings';
 import { isTransferKind, type ExtractedFields, type Rule, type RuleLookups } from '../domain/rule';
 import { ruleError, type RuleError } from '../domain/rule-error';
-import type { RuleRepositories } from './ports';
+import type { RuleDeps, RuleRepositories } from './ports';
 
 /** What a running write needs. Everything here awaits only that write's own statements. */
 export type FlowContext = {
@@ -35,9 +36,28 @@ export async function loadMessageSettings(settings: SettingsRepository): Promise
     readSetting(await settings.get(SETTING_KEYS[key]), DEFAULT_MESSAGE_SETTINGS[key]);
   return {
     retentionDays: await read('retentionDays'),
-    dedupWindowHours: await read('dedupWindowHours'),
+    dedupWindowMinutes: await read('dedupWindowMinutes'),
     transferWindowHours: await read('transferWindowHours'),
   };
+}
+
+/**
+ * The install's secret, created on first need. Run this before opening a write: generating
+ * it awaits something other than the database. A write decides who wins a first-use race.
+ */
+export async function loadDedupSecret({
+  store,
+  generateSecret,
+}: Pick<RuleDeps, 'store' | 'generateSecret'>): Promise<string> {
+  const stored = await store.settings.get(DEDUP_SECRET_KEY);
+  if (stored) return stored;
+  const fresh = await generateSecret();
+  return store.atomic(async ({ settings }) => {
+    const raced = await settings.get(DEDUP_SECRET_KEY);
+    if (raced) return raced;
+    await settings.set(DEDUP_SECRET_KEY, fresh);
+    return fresh;
+  });
 }
 
 export async function loadLookups({
@@ -234,16 +254,69 @@ export async function postItem(
   return ok({ transaction: transaction.value, item: updated });
 }
 
+/** Links a side to the movement its other side already posted, which adds no money. */
+export async function joinPosted(
+  { rules }: RuleRepositories,
+  item: InboxItem,
+  other: InboxItem,
+): Promise<InboxItem> {
+  const joined: InboxItem = {
+    ...item,
+    status: 'posted',
+    body: null,
+    note: null,
+    pairItemId: other.id,
+    transactionId: other.transactionId,
+  };
+  await rules.saveItem(joined);
+  await rules.saveItem({ ...other, pairItemId: item.id });
+  return joined;
+}
+
+/** What to tell the user when a message disagrees with the movement it would join. */
+async function joinMismatch(
+  { journal, currencies }: RuleRepositories,
+  item: InboxItem,
+  other: InboxItem,
+): Promise<string | null> {
+  const transaction = other.transactionId ? await journal.get(other.transactionId) : null;
+  const posting = transaction?.postings.find(({ accountId }) => accountId === item.accountId);
+  if (!posting || item.amountMinor === null) return null;
+  const recorded = posting.amount < 0n ? -posting.amount : posting.amount;
+  if (recorded === item.amountMinor) return null;
+  const decimals = (await currencies.get(posting.currency))?.decimals ?? 0;
+  const [said, kept] = [item.amountMinor, recorded].map((minor) => formatDecimal(minor, decimals));
+  return `This message says ${said} ${posting.currency}, but the posted movement records ${kept} ${posting.currency}.`;
+}
+
+/** Null when the rate cannot be worked out, which still sends the pair to review. */
+async function impliedRateNote(
+  { currencies }: RuleRepositories,
+  item: InboxItem,
+  other: InboxItem,
+): Promise<string | null> {
+  const { sent, received } = movementOf(item, other);
+  if (!sent || !received) return null;
+  const source = await currencies.get(sent.code);
+  const target = await currencies.get(received.code);
+  if (!source || !target) return null;
+  const rate = deriveRate(sent.minor, received.minor, source.decimals, target.decimals);
+  const shown = rate.includes('.') ? rate.replace(/\.?0+$/, '') : rate;
+  return `Implied rate: 1 ${source.code} = ${shown} ${target.code}. Check it before approving.`;
+}
+
 /**
  * Looks for the other side of a transfer. A side the user already posted alone counts, so a
- * message arriving late joins that transfer instead of creating another.
+ * message arriving late joins that transfer instead of creating another, unless they disagree.
+ * A rate nobody typed is unproven, so a pair across currencies always waits for a person.
  */
 async function tryPair(
   context: FlowContext,
   item: InboxItem,
   { transferWindowHours }: MessageSettings,
 ): Promise<InboxItem> {
-  const { rules } = context.repositories;
+  const { repositories } = context;
+  const { rules } = repositories;
   const kind = pairingKind(item.kind);
   if (!kind) return item;
   const windowMs = hoursToMs(transferWindowHours);
@@ -257,24 +330,30 @@ async function tryPair(
   if (!other) return item;
 
   if (other.status === 'posted') {
-    const joined: InboxItem = {
-      ...item,
-      status: 'posted',
-      body: null,
-      note: null,
-      pairItemId: other.id,
-      transactionId: other.transactionId,
-    };
-    await rules.saveItem(joined);
-    await rules.saveItem({ ...other, pairItemId: item.id });
-    return joined;
+    const mismatch = await joinMismatch(repositories, item, other);
+    if (!mismatch) return joinPosted(repositories, item, other);
+    const held: InboxItem = { ...item, status: 'proposed', autoPost: false, note: mismatch };
+    await rules.saveItem(held);
+    return held;
   }
 
-  const first: InboxItem = { ...item, status: 'proposed', pairItemId: other.id };
-  const second: InboxItem = { ...other, status: 'proposed', pairItemId: item.id };
+  const crossCurrency = item.currencyCode !== other.currencyCode;
+  const rateNote = crossCurrency ? await impliedRateNote(repositories, item, other) : null;
+  const first: InboxItem = {
+    ...item,
+    status: 'proposed',
+    pairItemId: other.id,
+    note: rateNote ?? item.note,
+  };
+  const second: InboxItem = {
+    ...other,
+    status: 'proposed',
+    pairItemId: item.id,
+    note: rateNote ?? other.note,
+  };
   await rules.saveItem(first);
   await rules.saveItem(second);
-  if (!first.autoPost || !second.autoPost) return first;
+  if (crossCurrency || !first.autoPost || !second.autoPost) return first;
   const posted = await postItem(context, first, second);
   if (posted.ok) return posted.value.item;
   const noted = { ...first, note: posted.error.message };

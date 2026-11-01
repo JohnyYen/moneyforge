@@ -23,9 +23,14 @@ export interface RuleRepository {
   listOpenItems(): Promise<InboxItem[]>;
   findItemByReference(sourceId: string, referenceKey: string): Promise<InboxItem | null>;
   listItemsByBodyHash(sourceId: string, bodyHash: string): Promise<InboxItem[]>;
-  /** Unpaired sides of `kind`: waiting, or posted alone with their transaction still there. */
+  /** Unpaired sides of `kind` in the range: open, or posted alone with their transaction. */
   listPairCandidates(kind: RuleKind, from: string, to: string): Promise<InboxItem[]>;
-  /** Deletes unresolved items received before `cutoff`, and returns how many. */
+  /** The same sides as `listPairCandidates`, however long ago they arrived. */
+  listUnpairedSides(kind: RuleKind): Promise<InboxItem[]>;
+  /**
+   * For items received before `cutoff`, deletes the unmatched ones and erases the text of the
+   * rest, which carry money and dedup keys. Returns how many changed.
+   */
   purgeUnresolvedBefore(cutoff: string): Promise<number>;
 }
 
@@ -37,8 +42,12 @@ export interface RuleStore extends RuleRepositories {
   atomic<T>(work: (repositories: RuleRepositories) => Promise<T>): Promise<T>;
 }
 
+export type SecretGenerator = () => string | Promise<string>;
+
 export type RuleDeps = {
   readonly store: RuleStore;
   readonly clock: Clock;
   readonly generateId: IdGenerator;
+  /** Called outside any write, so it may take its time. */
+  readonly generateSecret: SecretGenerator;
 };

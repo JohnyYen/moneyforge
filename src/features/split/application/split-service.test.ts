@@ -38,6 +38,7 @@ describe('income split', () => {
       driver: sql,
       clock: { now: () => new Date('2026-03-10T12:00:00.000Z') },
       generateId: () => `id-${++sequence}`,
+      generateSecret: () => 'test-secret',
     });
 
   beforeEach(async () => {

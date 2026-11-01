@@ -6,7 +6,7 @@ import type { ItemDraft } from '../application/inbox-use-cases';
 import type { IngestResult } from '../application/ingest-message';
 import type { RuleInput } from '../application/rule-use-cases';
 import type { InboxItem } from '../domain/inbox-item';
-import { MAX_MESSAGE_LENGTH, normalizeBody } from '../domain/message';
+import { foldCase, MAX_MESSAGE_LENGTH, normalizeBody } from '../domain/message';
 import type { MessageSettings } from '../domain/message-settings';
 import type { NumberFormat } from '../domain/number-format';
 import {
@@ -18,7 +18,7 @@ import {
   type RuleLookups,
   type SplitMode,
 } from '../domain/rule';
-import { compileTemplate, templateFromMessage } from '../domain/template';
+import { compileTemplate, templateFromMessage, templateLiterals } from '../domain/template';
 
 export const KIND_LABELS: Readonly<Record<RuleKind, string>> = {
   income: 'Income',
@@ -89,10 +89,10 @@ export const ruleDraftFor = ({ id: _id, priority, samples, ...rule }: Rule): Rul
   samples: samples.length > 0 ? samples : [''],
 });
 
+/** Samples stay what the user types: a real message would outlive its retention in the rule. */
 export const ruleDraftFromItem = ({ sourceId, body }: InboxItem): RuleDraft => ({
   ...emptyRuleDraft(sourceId),
   template: templateFromMessage(body ?? ''),
-  samples: [body ?? ''],
 });
 
 /** Keeps a bad number as NaN, so the use case refuses it instead of a default replacing it. */
@@ -116,6 +116,25 @@ export function templateProblem(template: string): string | null {
   if (!template.trim()) return null;
   const compiled = compileTemplate(template);
   return compiled.ok ? null : compiled.error.message;
+}
+
+/** Below this, fixed text is plausibly wording. Longer text may hold a name or an address. */
+const COPIED_TEXT_LENGTH = 12;
+
+/** Warns about fixed text taken from a real message that looks like a value, not wording. */
+export function templateCopyWarning(template: string, message: string | null): string | null {
+  if (!message) return null;
+  const text = foldCase(normalizeBody(message));
+  const copied = templateLiterals(template)
+    .map((literal) => literal.trim())
+    .find(
+      (literal) =>
+        (literal.length >= COPIED_TEXT_LENGTH || /[0-9]/.test(literal)) &&
+        text.includes(foldCase(literal)),
+    );
+  return copied
+    ? `"${copied}" comes from the message and stays in the rule. Replace names, numbers, and references with placeholders.`
+    : null;
 }
 
 export type SampleResult = {
@@ -258,12 +277,12 @@ export type SettingsDraft = Readonly<Record<keyof MessageSettings, string>>;
 
 export const settingsDraftFor = (settings: MessageSettings): SettingsDraft => ({
   retentionDays: String(settings.retentionDays),
-  dedupWindowHours: String(settings.dedupWindowHours),
+  dedupWindowMinutes: String(settings.dedupWindowMinutes),
   transferWindowHours: String(settings.transferWindowHours),
 });
 
 export const toSettings = (draft: SettingsDraft): MessageSettings => ({
   retentionDays: Number(draft.retentionDays.trim() || Number.NaN),
-  dedupWindowHours: Number(draft.dedupWindowHours.trim() || Number.NaN),
+  dedupWindowMinutes: Number(draft.dedupWindowMinutes.trim() || Number.NaN),
   transferWindowHours: Number(draft.transferWindowHours.trim() || Number.NaN),
 });

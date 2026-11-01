@@ -3,9 +3,12 @@ import { parseDecimal } from '@/features/ledger/domain/money';
 import { err, ok, type Result } from '@/shared/result';
 
 import {
+  clearForRejection,
   inboxSections,
   isResolved,
   needsAttention,
+  pairingKind,
+  pickPair,
   type InboxItem,
   type InboxSections,
 } from '../domain/inbox-item';
@@ -13,6 +16,7 @@ import { daysToMs, hoursToMs } from '../domain/message-settings';
 import { isTransferKind, RULE_KINDS, type RuleKind } from '../domain/rule';
 import { ruleError, type RuleError } from '../domain/rule-error';
 import {
+  joinPosted,
   loadMessageSettings,
   placeItem,
   postItem,
@@ -34,6 +38,8 @@ export type ItemDraft = {
 export type ApproveOptions = {
   /** The amount on the other side, for one side of a conversion posted alone. */
   readonly counterAmount?: string;
+  /** The answer to `confirmation-required`: is the opposite side found the same movement? */
+  readonly otherSide?: 'same' | 'different';
 };
 
 export type ItemDetails = {
@@ -92,6 +98,50 @@ async function applyDraft(
   });
 }
 
+/**
+ * An opposite side at any distance. The pairing window decides what links by itself, but
+ * posting a side alone is the last chance to notice that its other side already arrived.
+ */
+async function findFarSide(
+  { rules }: RuleRepositories,
+  item: InboxItem,
+): Promise<InboxItem | null> {
+  const kind = pairingKind(item.kind);
+  if (!kind) return null;
+  return pickPair(item, await rules.listUnpairedSides(kind), Number.POSITIVE_INFINITY);
+}
+
+const askAboutFarSide = (other: InboxItem) =>
+  err(
+    ruleError(
+      'confirmation-required',
+      `A message from ${other.receivedAt.slice(0, 10)} looks like the other side of this transfer.`,
+    ),
+  );
+
+async function joinFarSide(
+  context: FlowContext,
+  item: InboxItem,
+  other: InboxItem,
+  counterAmount: string | undefined,
+): Promise<ItemResult<Transaction>> {
+  const { repositories } = context;
+  if (other.status === 'posted') {
+    const { transactionId } = other;
+    const transaction = transactionId ? await repositories.journal.get(transactionId) : null;
+    if (!transaction) return err(ruleError('not-found', 'Transaction not found.'));
+    await joinPosted(repositories, item, other);
+    return ok(transaction);
+  }
+  const posted = await postItem(
+    context,
+    { ...item, pairItemId: other.id },
+    { ...other, pairItemId: item.id },
+    counterAmount,
+  );
+  return posted.ok ? ok(posted.value.transaction) : posted;
+}
+
 export function createInboxUseCases({ store, clock, generateId }: RuleDeps) {
   const contextOf = (repositories: RuleRepositories): FlowContext => ({
     repositories,
@@ -137,22 +187,26 @@ export function createInboxUseCases({ store, clock, generateId }: RuleDeps) {
         return ok(await placeItem(contextOf(repositories), edited.value, settings));
       }),
 
-    /** Approves the whole movement when the item is one side of a pair. */
+    /**
+     * Approves the whole movement when the item is one side of a pair. A lone side with an
+     * opposite side anywhere answers `confirmation-required` until `otherSide` says which.
+     */
     approveItem: (
       id: string,
-      { counterAmount }: ApproveOptions = {},
+      { counterAmount, otherSide }: ApproveOptions = {},
     ): Promise<ItemResult<Transaction>> =>
       store.atomic(async (repositories) => {
         const item = await openItem(repositories, id);
         if (!item.ok) return item;
         const { pairItemId } = item.value;
         const partner = pairItemId ? await repositories.rules.getItem(pairItemId) : null;
-        const posted = await postItem(
-          contextOf(repositories),
-          item.value,
-          partner,
-          counterAmount,
-        );
+        const context = contextOf(repositories);
+        const farSide = partner ? null : await findFarSide(repositories, item.value);
+        if (farSide && !otherSide) return askAboutFarSide(farSide);
+        if (farSide && otherSide === 'same') {
+          return joinFarSide(context, item.value, farSide, counterAmount);
+        }
+        const posted = await postItem(context, item.value, partner, counterAmount);
         return posted.ok ? ok(posted.value.transaction) : posted;
       }),
 
@@ -161,13 +215,7 @@ export function createInboxUseCases({ store, clock, generateId }: RuleDeps) {
         const item = await openItem(repositories, id);
         if (!item.ok) return item;
         await releasePartner(repositories, item.value);
-        await repositories.rules.saveItem({
-          ...item.value,
-          status: 'rejected',
-          body: null,
-          note: null,
-          pairItemId: null,
-        });
+        await repositories.rules.saveItem(clearForRejection(item.value));
         return ok(undefined);
       }),
 
@@ -179,7 +227,7 @@ export function createInboxUseCases({ store, clock, generateId }: RuleDeps) {
         return ok(undefined);
       }),
 
-    /** Deterministic in `now`. Resolved items stay, because they are what makes a replay inert. */
+    /** Deterministic in `now`. Only messages with no money on them go; see the repository. */
     purgeExpired: (now: Date): Promise<number> =>
       store.atomic(async ({ rules, settings }) => {
         const { retentionDays } = await loadMessageSettings(settings);

@@ -161,3 +161,38 @@ describe('selectRule', () => {
     expect(selectRule([low, high], 'Nothing here', lookups)).toBeNull();
   });
 });
+
+describe('amount length', () => {
+  const lookups = {
+    accounts: [{ id: 'a', currencyCode: 'USD' }],
+    currencies: [{ code: 'USD', decimals: 2 }],
+  };
+  const capped: Rule = {
+    id: 'r',
+    sourceId: 's',
+    name: 'Rule',
+    priority: 0,
+    template: 'Paid {amount} ok',
+    format: { decimal: '.', thousands: '' },
+    kind: 'expense',
+    accountId: 'a',
+    categoryId: null,
+    counterpartAccountId: null,
+    currencyCode: null,
+    autoPost: false,
+    splitMode: 'none',
+    splitStructureId: null,
+    samples: [],
+  };
+
+  it('refuses an amount over the cap, without repeating it', () => {
+    const amount = '1'.repeat(65);
+    const evaluation = evaluateRule(capped, `Paid ${amount} ok`, lookups);
+    expect(evaluation.status).toBe('failed');
+    expect(JSON.stringify(evaluation)).not.toContain(amount);
+  });
+
+  it('reads an amount at the cap', () => {
+    expect(evaluateRule(capped, `Paid ${'1'.repeat(64)} ok`, lookups).status).toBe('matched');
+  });
+});

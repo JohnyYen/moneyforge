@@ -51,3 +51,15 @@ describe('isValidNumberFormat', () => {
     expect(isValidNumberFormat({ decimal: '.', thousands: '-' })).toBe(false);
   });
 });
+
+describe('parseAmountText, leading zeros', () => {
+  const format = { decimal: '.', thousands: ',' } as const;
+
+  it.each(['0,500', '01,500', '0,500.25'])('refuses %j', (text) => {
+    expect(parseAmountText(text, format)).toBeNull();
+  });
+
+  it('keeps a plain zero whole part', () => {
+    expect(parseAmountText('0.50', format)).toBe('0.50');
+  });
+});

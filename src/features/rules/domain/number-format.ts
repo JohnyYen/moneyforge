@@ -18,7 +18,8 @@ export function isValidNumberFormat({ decimal, thousands }: {
 }
 
 const DIGITS = /^[0-9]+$/;
-const FIRST_GROUP = /^[0-9]{1,3}$/;
+/** With groups, a leading zero means the text is really a decimal in another format. */
+const FIRST_GROUP = /^[1-9][0-9]{0,2}$/;
 const LATER_GROUP = /^[0-9]{3}$/;
 
 function plainWholePart(text: string, thousands: string): string | null {

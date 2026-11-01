@@ -47,6 +47,7 @@ describe('rules engine', () => {
       driver: sql,
       clock: { now: () => new Date(now) },
       generateId: () => `id-${++sequence}`,
+      generateSecret: () => 'test-secret',
     });
 
   const tableNames = async () =>
@@ -107,17 +108,21 @@ describe('rules engine', () => {
   const rule = async (over: Partial<RuleInput> = {}) =>
     unwrap(await services.rules.createRule(ruleInput(over)));
 
+  /** Moves the clock along, because a message is never dated after now. */
   const ingest = (
     body: string,
     over: { channel?: MessageChannel; sender?: string; receivedAt?: string } = {},
-  ) =>
-    services.rules.ingestMessage({
+  ) => {
+    const arrival = Date.parse(over.receivedAt ?? NOW);
+    if (arrival > Date.parse(now)) now = new Date(arrival).toISOString();
+    return services.rules.ingestMessage({
       channel: 'sms',
       sender: SENDER,
       receivedAt: NOW,
       ...over,
       body,
     });
+  };
 
   const items = () =>
     driver.all<Record<string, string | number | null>>(
@@ -343,13 +348,24 @@ describe('rules engine', () => {
       expect((await items())[0].status).toBe('unmatched');
     });
 
-    it('caps what it stores and never matches a message over the limit', async () => {
+    it('never matches a message over the limit and does not store its body', async () => {
       await rule({ template: 'Got {amount} {*}', autoPost: true });
-      await ingest(`Got 5 ${'x'.repeat(3000)}`);
+      const body = `Got 5 ${'x'.repeat(3000)}`;
+      await ingest(body);
       await expect(transactions()).resolves.toEqual([]);
       const [item] = await items();
-      expect(item.status).toBe('unmatched');
-      expect(String(item.body)).toHaveLength(2000);
+      expect(item).toMatchObject({ status: 'unmatched', body: null });
+      expect(item.note).toContain('2000');
+      expect(JSON.stringify(await snapshot())).not.toContain('xxxxx');
+    });
+
+    it('does not let two long messages share a fingerprint through a common prefix', async () => {
+      const prefix = 'x'.repeat(2000);
+      await ingest(`${prefix} first`);
+      await ingest(`${prefix} second`);
+      const [first, second] = await items();
+      expect(first.body_hash).not.toBe(second.body_hash);
+      expect(second.note).not.toMatch(/possible repeat/i);
     });
   });
 
@@ -392,8 +408,8 @@ describe('rules engine', () => {
       unwrap(
         await services.rules.updateMessageSettings({
           retentionDays: 2,
-          dedupWindowHours: 24,
-          transferWindowHours: 72,
+          dedupWindowMinutes: 10,
+          transferWindowHours: 24,
         }),
       );
       await ingest('Old message');
@@ -416,14 +432,42 @@ describe('rules engine', () => {
       });
     });
 
-    it('returns a paired side to waiting when its partner is purged', async () => {
+    it('keeps a pair with money on it, erasing only the expired text', async () => {
       const { out, incoming } = await transferRules();
       await ingest(out('100.00', 'T1'), { receivedAt: NOW });
       await ingest(incoming('100.00', 'T2'), { receivedAt: hoursAfter(2) });
       await expect(services.rules.purgeExpired(new Date(hoursAfter(30 * 24 + 1)))).resolves.toBe(1);
+      const [first, second] = await items();
+      expect(first).toMatchObject({ status: 'proposed', body: null, amount_minor: '10000' });
+      expect(second).toMatchObject({ status: 'proposed', pair_item_id: first.id });
+      expect(second.body).not.toBeNull();
+    });
+
+    it('never discards a pending item that carries money', async () => {
+      await rule();
+      await ingest(SALARY);
+      await expect(services.rules.purgeExpired(new Date(daysAfter(31)))).resolves.toBe(1);
       expect(await items()).toEqual([
-        expect.objectContaining({ status: 'waiting_pair', pair_item_id: null }),
+        expect.objectContaining({ status: 'proposed', body: null, amount_minor: '150025' }),
       ]);
+      unwrap(await services.rules.approveItem(String((await items())[0].id)));
+      await expect(balanceOf(checking.id)).resolves.toBe(150025n);
+    });
+
+    it('keeps the dedup keys of an expired pending item, so a replay stays inert', async () => {
+      await rule();
+      await ingest(SALARY);
+      await services.rules.purgeExpired(new Date(daysAfter(31)));
+      await expect(ingest(SALARY, { receivedAt: daysAfter(31) })).resolves.toEqual({
+        outcome: 'duplicate',
+      });
+    });
+
+    it('counts an erased body once', async () => {
+      await rule();
+      await ingest(SALARY);
+      await expect(services.rules.purgeExpired(new Date(daysAfter(31)))).resolves.toBe(1);
+      await expect(services.rules.purgeExpired(new Date(daysAfter(32)))).resolves.toBe(0);
     });
   });
 
@@ -462,46 +506,134 @@ describe('rules engine', () => {
       await expect(items()).resolves.toHaveLength(1);
     });
 
-    it('creates no second item for a paste then an SMS with no reference', async () => {
-      await rule({ template: 'Paid {amount} at Shop' , kind: 'expense' });
-      await ingest('Paid 10 at Shop', { channel: 'paste' });
-      await expect(ingest('Paid 10 at Shop', { receivedAt: hoursAfter(1) })).resolves.toEqual({
-        outcome: 'duplicate',
+    it('keeps a same-text repeat inside the window for review, never dropping it', async () => {
+      await rule({ template: 'Paid {amount} at Shop', kind: 'expense', autoPost: true });
+      await ingest('Paid 10 at Shop');
+      await expect(ingest('Paid 10 at Shop', { receivedAt: hoursAfter(0.1) })).resolves.toMatchObject({
+        outcome: 'inbox',
+        status: 'proposed',
       });
+      await expect(transactions()).resolves.toHaveLength(1);
+      const [, repeat] = await items();
+      expect(repeat).toMatchObject({ status: 'proposed', auto_post: 0, amount_minor: '1000' });
+      expect(repeat.note).toMatch(/possible repeat/i);
+      expect(repeat.note).toMatch(/10 minutes/);
     });
 
-    it('falls back to the body within the window and treats a later one as new', async () => {
-      await rule({ template: 'Paid {amount} at Shop', kind: 'expense' });
+    it('holds a replay after the window for review instead of posting it again', async () => {
+      await rule({ template: 'Paid {amount} at Shop', kind: 'expense', autoPost: true });
       await ingest('Paid 10 at Shop');
-      await expect(ingest('Paid 10 at Shop', { receivedAt: hoursAfter(24) })).resolves.toEqual({
-        outcome: 'duplicate',
+      await expect(ingest('Paid 10 at Shop', { receivedAt: daysAfter(3) })).resolves.toMatchObject({
+        outcome: 'inbox',
+        status: 'proposed',
       });
-      await expect(
-        ingest('Paid 10 at Shop', { receivedAt: hoursAfter(24.1) }),
-      ).resolves.toMatchObject({ outcome: 'inbox' });
-      await expect(items()).resolves.toHaveLength(2);
+      await expect(transactions()).resolves.toHaveLength(1);
+      const [, repeat] = await items();
+      expect(repeat).toMatchObject({ status: 'proposed', auto_post: 0 });
+      expect(repeat.note).toMatch(/possible repeat/i);
+      expect(repeat.note).not.toMatch(/10 minutes/);
+    });
+
+    it('lets the user approve a real second movement held as a repeat', async () => {
+      await rule({ template: 'Paid {amount} at Shop', kind: 'expense', autoPost: true });
+      await ingest('Paid 10 at Shop');
+      await ingest('Paid 10 at Shop', { receivedAt: hoursAfter(1) });
+      unwrap(await services.rules.approveItem(String((await items())[1].id)));
+      await expect(balanceOf(checking.id)).resolves.toBe(-2000n);
+    });
+
+    it('notes a repeat of a message no rule matched', async () => {
+      await ingest('Something new');
+      await ingest('Something new', { receivedAt: hoursAfter(1) });
+      const [, repeat] = await items();
+      expect(repeat.status).toBe('unmatched');
+      expect(repeat.note).toMatch(/possible repeat/i);
+    });
+
+    it('never posts a repeat through a pairing', async () => {
+      const { incoming } = await transferRules({ autoPost: true });
+      await rule({
+        name: 'Out, no reference',
+        template: 'Moved {amount} USD to savings',
+        kind: 'transfer_out',
+        counterpartAccountId: savings.id,
+        autoPost: true,
+      });
+      await ingest('Moved 100.00 USD to savings');
+      await ingest(incoming('100.00', 'T2'));
+      await expect(transactions()).resolves.toHaveLength(1);
+      await ingest('Moved 100.00 USD to savings', { receivedAt: hoursAfter(1) });
+      await ingest(incoming('100.00', 'T3'), { receivedAt: hoursAfter(1) });
+      await expect(transactions()).resolves.toHaveLength(1);
+      expect((await items()).filter(({ status }) => status === 'proposed')).toHaveLength(2);
     });
 
     it('follows the dedup window setting', async () => {
       unwrap(
         await services.rules.updateMessageSettings({
           retentionDays: 30,
-          dedupWindowHours: 1,
+          dedupWindowMinutes: 60,
           transferWindowHours: 72,
         }),
       );
       await ingest('Hello');
-      await expect(ingest('Hello', { receivedAt: hoursAfter(2) })).resolves.toMatchObject({
-        outcome: 'inbox',
+      await ingest('Hello', { receivedAt: hoursAfter(0.5) });
+      await ingest('Hello', { receivedAt: hoursAfter(2) });
+      const [, inside, outside] = await items();
+      expect(inside.note).toMatch(/60 minutes/);
+      expect(outside.note).toMatch(/possible repeat/i);
+      expect(outside.note).not.toMatch(/60 minutes/);
+    });
+
+    it('keeps a reversal with the reference of its purchase', async () => {
+      await rule({ name: 'Buy', template: 'Paid {amount} USD. Ref {reference}', kind: 'expense' });
+      await rule({ name: 'Back', template: 'Reversed {amount} USD. Ref {reference}', kind: 'income' });
+      await ingest('Paid 10 USD. Ref A1');
+      await expect(ingest('Reversed 10 USD. Ref A1')).resolves.toMatchObject({ outcome: 'inbox' });
+      await expect(items()).resolves.toHaveLength(2);
+    });
+
+    it('pairs the two sides of a transfer that share one reference', async () => {
+      const { out, incoming } = await transferRules({ autoPost: true });
+      await ingest(out('100.00', 'SAME'));
+      await ingest(incoming('100.00', 'SAME'));
+      await expect(transactions()).resolves.toHaveLength(1);
+    });
+
+    it('still recognizes a replay after the user changed the kind of its item', async () => {
+      await rule();
+      await ingest(SALARY);
+      const [{ id }] = await items();
+      unwrap(
+        await services.rules.editItem(String(id), {
+          kind: 'expense',
+          accountId: checking.id,
+          counterpartAccountId: null,
+          categoryId: null,
+          amount: '1500.25',
+          description: 'Corrected',
+        }),
+      );
+      await expect(ingest(SALARY, { receivedAt: daysAfter(2) })).resolves.toEqual({
+        outcome: 'duplicate',
       });
     });
 
-    it('recognizes a message that first arrived before its rule existed', async () => {
-      await ingest(SALARY);
+    it('never stores a reference in the clear as a dedup key', async () => {
       await rule();
-      await expect(ingest(SALARY, { receivedAt: hoursAfter(1) })).resolves.toEqual({
-        outcome: 'duplicate',
+      await ingest(SALARY);
+      const [item] = await items();
+      expect(item.reference_key).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('holds a message that first arrived before its rule existed', async () => {
+      await ingest(SALARY);
+      await rule({ autoPost: true });
+      await expect(ingest(SALARY, { receivedAt: hoursAfter(1) })).resolves.toMatchObject({
+        outcome: 'inbox',
+        status: 'proposed',
       });
+      await expect(transactions()).resolves.toEqual([]);
     });
 
     it('deduplicates two copies racing each other', async () => {
@@ -513,7 +645,7 @@ describe('rules engine', () => {
   });
 
   describe('idempotent replay', () => {
-    it('creates nothing when a message with no reference and an edited amount comes back', async () => {
+    it('posts nothing when a message with no reference and an edited amount comes back', async () => {
       await rule({ template: 'Paid {amount} at Shop', kind: 'expense' });
       await ingest('Paid 10 at Shop');
       const [{ id }] = await items();
@@ -528,9 +660,11 @@ describe('rules engine', () => {
         }),
       );
       unwrap(await services.rules.approveItem(String(id)));
-      await expect(ingest('Paid 10 at Shop', { receivedAt: hoursAfter(1) })).resolves.toEqual({
-        outcome: 'duplicate',
+      await expect(ingest('Paid 10 at Shop', { receivedAt: hoursAfter(1) })).resolves.toMatchObject({
+        outcome: 'inbox',
+        status: 'proposed',
       });
+      await expect(transactions()).resolves.toHaveLength(1);
     });
 
     it('creates nothing when a posted message comes back', async () => {
@@ -550,12 +684,11 @@ describe('rules engine', () => {
       await expect(snapshot()).resolves.toEqual(before);
     });
 
-    it('creates nothing when a rejected message with no reference comes back', async () => {
+    it('asks again when a rejected message with no reference comes back', async () => {
       await ingest('Something new');
       unwrap(await services.rules.rejectItem(String((await items())[0].id)));
-      const before = await snapshot();
-      await expect(ingest('Something new')).resolves.toEqual({ outcome: 'duplicate' });
-      await expect(snapshot()).resolves.toEqual(before);
+      await expect(ingest('Something new')).resolves.toMatchObject({ outcome: 'inbox' });
+      expect((await items())[1].note).toMatch(/possible repeat/i);
     });
 
     it('does not post again when a posted transaction was deleted', async () => {
@@ -684,12 +817,29 @@ describe('rules engine', () => {
       expect(details?.partner?.kind).toBe('transfer_in');
     });
 
+    it('sends a pair across currencies to review, showing the implied rate', async () => {
+      const euros = await account('Euros', 'EUR');
+      const { out, incoming } = await transferRules({ autoPost: true, to: euros });
+
+      await ingest(out('100.00', 'T1'));
+      await expect(ingest(incoming('92.50', 'T2', 'EUR'))).resolves.toMatchObject({
+        outcome: 'inbox',
+        status: 'proposed',
+      });
+
+      await expect(transactions()).resolves.toEqual([]);
+      const both = await items();
+      expect(both.map(({ status }) => status)).toEqual(['proposed', 'proposed']);
+      expect(both[0].note).toContain('1 USD = 0.925 EUR');
+    });
+
     it('makes one conversion with both amounts when the currencies differ', async () => {
       const euros = await account('Euros', 'EUR');
       const { out, incoming } = await transferRules({ autoPost: true, to: euros });
 
       await ingest(out('100.00', 'T1'));
       await ingest(incoming('92.50', 'T2', 'EUR'));
+      unwrap(await services.rules.approveItem(String((await items())[0].id)));
 
       const stored = await transactions();
       expect(stored).toEqual([expect.objectContaining({ kind: 'conversion' })]);
@@ -725,7 +875,7 @@ describe('rules engine', () => {
       unwrap(
         await services.rules.updateMessageSettings({
           retentionDays: 30,
-          dedupWindowHours: 24,
+          dedupWindowMinutes: 10,
           transferWindowHours: 2,
         }),
       );
@@ -793,6 +943,126 @@ describe('rules engine', () => {
 
       unwrap(await services.rules.approveItem(String(id), { counterAmount: '92.50' }));
       await expect(balanceOf(euros.id)).resolves.toBe(9250n);
+    });
+
+    describe('a lone side with an opposite side outside the window', () => {
+      const farApart = async () => {
+        const { out, incoming } = await transferRules();
+        await ingest(out('100.00', 'T1'));
+        await ingest(incoming('100.00', 'T2'), { receivedAt: hoursAfter(100) });
+        const [first, second] = await items();
+        return { first: String(first.id), second: String(second.id) };
+      };
+
+      it('asks before posting, whichever side is approved', async () => {
+        const { first, second } = await farApart();
+        for (const id of [first, second]) {
+          await expect(services.rules.approveItem(id)).resolves.toMatchObject({
+            ok: false,
+            error: { code: 'confirmation-required' },
+          });
+        }
+        await expect(transactions()).resolves.toEqual([]);
+      });
+
+      it('makes one transfer when the user says they are the same movement', async () => {
+        const { first } = await farApart();
+        unwrap(await services.rules.approveItem(first, { otherSide: 'same' }));
+        await expect(transactions()).resolves.toHaveLength(1);
+        await expect(balanceOf(savings.id)).resolves.toBe(10000n);
+        expect((await items()).map(({ status }) => status)).toEqual(['posted', 'posted']);
+        await expect(allPostingsBalance()).resolves.toBe(true);
+      });
+
+      it('joins a side the user already posted alone, adding nothing', async () => {
+        const { first, second } = await farApart();
+        const posted = unwrap(await services.rules.approveItem(first, { otherSide: 'different' }));
+        await expect(transactions()).resolves.toHaveLength(1);
+
+        await expect(services.rules.approveItem(second)).resolves.toMatchObject({
+          ok: false,
+          error: { code: 'confirmation-required' },
+        });
+        const joined = unwrap(await services.rules.approveItem(second, { otherSide: 'same' }));
+
+        expect(joined.id).toBe(posted.id);
+        await expect(transactions()).resolves.toHaveLength(1);
+        await expect(balanceOf(savings.id)).resolves.toBe(10000n);
+        const both = await items();
+        expect(both.map(({ transaction_id: id }) => id)).toEqual([posted.id, posted.id]);
+        expect(both[1].body).toBeNull();
+      });
+
+      it('makes two transfers only when the user says they are different', async () => {
+        const { first, second } = await farApart();
+        unwrap(await services.rules.approveItem(first, { otherSide: 'different' }));
+        unwrap(await services.rules.approveItem(second, { otherSide: 'different' }));
+        await expect(transactions()).resolves.toHaveLength(2);
+      });
+
+      it('does not ask about a different amount in one currency', async () => {
+        const { out, incoming } = await transferRules();
+        await ingest(out('100.00', 'T1'));
+        await ingest(incoming('99.00', 'T2'), { receivedAt: hoursAfter(100) });
+        unwrap(await services.rules.approveItem(String((await items())[0].id)));
+        await expect(transactions()).resolves.toHaveLength(1);
+      });
+
+      it('finds a side held as a repeat', async () => {
+        const { incoming } = await transferRules();
+        await rule({
+          name: 'Out, no reference',
+          template: 'Moved {amount} USD to savings',
+          kind: 'transfer_out',
+          counterpartAccountId: savings.id,
+        });
+        await ingest('Moved 100.00 USD to savings');
+        unwrap(await services.rules.rejectItem(String((await items())[0].id)));
+        await ingest('Moved 100.00 USD to savings', { receivedAt: hoursAfter(1) });
+        await ingest(incoming('100.00', 'T2'), { receivedAt: hoursAfter(200) });
+        const last = (await items())[2];
+
+        await expect(services.rules.approveItem(String(last.id))).resolves.toMatchObject({
+          ok: false,
+          error: { code: 'confirmation-required' },
+        });
+        unwrap(await services.rules.approveItem(String(last.id), { otherSide: 'same' }));
+
+        await expect(transactions()).resolves.toHaveLength(1);
+        expect((await items()).map(({ status }) => status)).toEqual(['rejected', 'posted', 'posted']);
+      });
+    });
+
+    describe('a side joining a conversion posted alone', () => {
+      const postedAlone = async (typed: string) => {
+        const euros = await account('Euros', 'EUR');
+        const { out, incoming } = await transferRules({ to: euros });
+        await ingest(out('100.00', 'T1'));
+        unwrap(await services.rules.approveItem(String((await items())[0].id), { counterAmount: typed }));
+        return { euros, incoming };
+      };
+
+      it('joins when the message agrees with the typed amount', async () => {
+        const { incoming } = await postedAlone('92.50');
+        await expect(ingest(incoming('92.50', 'T2', 'EUR'))).resolves.toMatchObject({
+          outcome: 'posted',
+        });
+        await expect(transactions()).resolves.toHaveLength(1);
+      });
+
+      it('flags a mismatch for review instead of hiding it', async () => {
+        const { euros, incoming } = await postedAlone('92.50');
+        await expect(ingest(incoming('90.00', 'T2', 'EUR'))).resolves.toMatchObject({
+          outcome: 'inbox',
+          status: 'proposed',
+        });
+        await expect(transactions()).resolves.toHaveLength(1);
+        await expect(balanceOf(euros.id)).resolves.toBe(9250n);
+        const [, side] = await items();
+        expect(side.note).toContain('90.00');
+        expect(side.note).toContain('92.50');
+        expect(await services.rules.countInbox()).toBe(1);
+      });
     });
 
     it('returns the other side to waiting when one side of a pair is rejected', async () => {
@@ -930,6 +1200,7 @@ describe('rules engine', () => {
   describe('atomic writes', () => {
     it('stores nothing when the post fails halfway', async () => {
       await rule({ autoPost: true });
+      await ingest('Hello');
       const before = await snapshot();
       const failing = servicesOn(failingOn(driver, /INSERT INTO postings/));
 
@@ -948,6 +1219,7 @@ describe('rules engine', () => {
         }),
       );
       await rule({ autoPost: true, splitMode: 'auto', splitStructureId: structure.id });
+      await ingest('Hello');
       const before = await snapshot();
       const failing = servicesOn(failingOn(driver, /INSERT INTO pending_moves/));
 
@@ -1065,7 +1337,7 @@ describe('rules engine', () => {
         status: 'proposed',
         rule_id: created.id,
         amount_minor: '150025',
-        reference_key: 'R-1',
+        reference_key: expect.stringMatching(/^[0-9a-f]{64}$/),
       });
     });
 
@@ -1118,6 +1390,169 @@ describe('rules engine', () => {
     });
   });
 
+  describe('one-time codes', () => {
+    const anyPurchase = {
+      name: 'Purchase',
+      template: '{*} for purchase of {amount} USD at {counterparty}',
+      kind: 'expense',
+      autoPost: true,
+    } as const;
+
+    it('keeps nothing of a one-time code that a rule would match', async () => {
+      await rule(anyPurchase);
+      const before = await snapshot();
+      await expect(ingest('Your OTP 482913 for purchase of 250 USD at Amazon')).resolves.toEqual({
+        outcome: 'one-time-code',
+      });
+      await expect(snapshot()).resolves.toEqual(before);
+    });
+
+    it('keeps a purchase notice with an authorization code', async () => {
+      await rule({
+        name: 'Card',
+        template: 'Purchase of {amount} USD at {counterparty}, auth code {*}',
+        kind: 'expense',
+        autoPost: true,
+      });
+      await expect(ingest('Purchase of 25 USD at Shop, auth code 123456')).resolves.toMatchObject({
+        outcome: 'posted',
+      });
+    });
+
+    it('refuses to save a rule built on a one-time code', async () => {
+      const template = 'Your OTP {*} for purchase of {amount} USD';
+      await expect(services.rules.createRule(ruleInput({ template }))).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'invalid-template' },
+      });
+      const saved = await rule();
+      await expect(
+        services.rules.updateRule({ ...ruleInput({ template }), id: saved.id }),
+      ).resolves.toMatchObject({ ok: false, error: { code: 'invalid-template' } });
+    });
+  });
+
+  describe('free fields', () => {
+    it('sends a counterparty over the cap to unmatched', async () => {
+      await rule({ autoPost: true });
+      await ingest(`You received 10.00 USD from ${'A'.repeat(65)}. Ref R-9`);
+      await expect(transactions()).resolves.toEqual([]);
+      expect((await items())[0]).toMatchObject({ status: 'unmatched', counterparty: null });
+    });
+
+    it('clears everything but the dedup keys on reject', async () => {
+      await rule();
+      await ingest(SALARY);
+      const [stored] = await items();
+      unwrap(await services.rules.rejectItem(String(stored.id)));
+
+      expect((await items())[0]).toEqual({
+        ...stored,
+        rule_id: null,
+        status: 'rejected',
+        body: null,
+        note: null,
+        kind: null,
+        account_id: null,
+        category_id: null,
+        counterpart_account_id: null,
+        amount_minor: null,
+        currency_code: null,
+        reference: null,
+        counterparty: null,
+        balance: null,
+        description: '',
+        auto_post: 0,
+        split_mode: 'none',
+        split_structure_id: null,
+        split_requested: 0,
+        pair_item_id: null,
+        transaction_id: null,
+      });
+      expect(JSON.stringify(await items())).not.toContain('Acme');
+      await expect(ingest(SALARY, { receivedAt: daysAfter(2) })).resolves.toEqual({
+        outcome: 'duplicate',
+      });
+    });
+  });
+
+  describe('arrival time', () => {
+    it('never dates a message after now', async () => {
+      await services.rules.ingestMessage({
+        channel: 'sms',
+        sender: SENDER,
+        receivedAt: daysAfter(5),
+        body: 'Hello',
+      });
+      expect((await items())[0].received_at).toBe(NOW);
+    });
+  });
+
+  describe('dedup secret', () => {
+    const secretRows = () =>
+      driver.all<{ value: string }>(`SELECT value FROM settings WHERE key = 'rules.dedup_secret'`);
+
+    it('stores one secret on the first accepted message and reuses it', async () => {
+      const generated: string[] = [];
+      const counting = createAppServices({
+        driver,
+        clock: { now: () => new Date(now) },
+        generateId: () => `id-${++sequence}`,
+        generateSecret: async () => {
+          generated.push(`secret-${generated.length}`);
+          return generated[generated.length - 1];
+        },
+      });
+      const message = { channel: 'sms', sender: SENDER, receivedAt: NOW, body: 'Hello' } as const;
+
+      const results = await Promise.all([
+        counting.rules.ingestMessage(message),
+        counting.rules.ingestMessage({ ...message, body: 'Hello there' }),
+      ]);
+      await counting.rules.ingestMessage({ ...message, body: 'Hello again' });
+
+      expect(results.map(({ outcome }) => outcome)).toEqual(['inbox', 'inbox']);
+      await expect(secretRows()).resolves.toHaveLength(1);
+      expect(generated.length).toBeLessThanOrEqual(2);
+    });
+
+    it('stores no secret for a dropped sender or a one-time code', async () => {
+      await ingest('Hello', { sender: 'Stranger' });
+      await ingest('Your OTP is 482913');
+      await expect(secretRows()).resolves.toEqual([]);
+    });
+
+    it('generates the secret outside any write', async () => {
+      let open = 0;
+      const counted: SqlExecutor = {
+        exec: (text) => driver.exec(text),
+        all: (text, params) => driver.all(text, params),
+        get: (text, params) => driver.get(text, params),
+        run: (text, params) => driver.run(text, params),
+        transaction: async (work) => {
+          open += 1;
+          try {
+            return await driver.transaction(work);
+          } finally {
+            open -= 1;
+          }
+        },
+      };
+      const seen: number[] = [];
+      const app = createAppServices({
+        driver: counted,
+        clock: { now: () => new Date(now) },
+        generateId: () => `id-${++sequence}`,
+        generateSecret: () => {
+          seen.push(open);
+          return 'test-secret';
+        },
+      });
+      await app.rules.ingestMessage({ channel: 'sms', sender: SENDER, receivedAt: NOW, body: 'Hello' });
+      expect(seen).toEqual([0]);
+    });
+  });
+
   describe('sources and rules', () => {
     it('refuses a second source for one sender', async () => {
       await expect(
@@ -1150,14 +1585,23 @@ describe('rules engine', () => {
 
     it('refuses settings outside the allowed range', async () => {
       await expect(
-        services.rules.updateMessageSettings({ retentionDays: 0, dedupWindowHours: 24, transferWindowHours: 72 }),
+        services.rules.updateMessageSettings({ retentionDays: 0, dedupWindowMinutes: 10, transferWindowHours: 72 }),
       ).resolves.toMatchObject({ ok: false, error: { code: 'invalid-settings' } });
+    });
+
+    it('refuses a retention shorter than the transfer window', async () => {
+      await expect(
+        services.rules.updateMessageSettings({ retentionDays: 2, dedupWindowMinutes: 10, transferWindowHours: 49 }),
+      ).resolves.toMatchObject({ ok: false, error: { code: 'invalid-settings' } });
+      unwrap(
+        await services.rules.updateMessageSettings({ retentionDays: 2, dedupWindowMinutes: 10, transferWindowHours: 48 }),
+      );
     });
 
     it('reports the default settings until they change', async () => {
       await expect(services.rules.getMessageSettings()).resolves.toEqual({
         retentionDays: 30,
-        dedupWindowHours: 24,
+        dedupWindowMinutes: 10,
         transferWindowHours: 72,
       });
     });

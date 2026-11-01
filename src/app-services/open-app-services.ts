@@ -2,6 +2,7 @@ import { generateId } from '@/shared/id';
 import { openExpoSqliteDriver } from '@/shared/persistence/expo-sqlite-driver';
 import { migrations } from '@/shared/persistence/migrations';
 import { runMigrations } from '@/shared/persistence/migrator';
+import { generateSecret } from '@/shared/secret';
 
 import { createAppServices, type AppServices } from './create-app-services';
 
@@ -14,6 +15,7 @@ export async function openAppServices(): Promise<AppServices> {
     driver,
     clock: { now: () => new Date() },
     generateId,
+    generateSecret,
   });
   await services.ledger.initialize();
   // Retried on the next start: a failed cleanup must not keep the user out of their ledger.

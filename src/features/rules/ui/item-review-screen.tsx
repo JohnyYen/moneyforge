@@ -6,7 +6,7 @@ import type { Category } from '@/features/ledger/domain/category';
 import type { Currency } from '@/features/ledger/domain/currency';
 import { formatDisplay } from '@/features/ledger/domain/money';
 import { useLedger } from '@/features/ledger/ui/ledger-context';
-import { err, ok } from '@/shared/result';
+import { err } from '@/shared/result';
 import { leaveScreen } from '@/shared/ui/leave-screen';
 import {
   AmountField,
@@ -29,6 +29,7 @@ import type { ItemDetails } from '../application/inbox-use-cases';
 import { isResolved, type InboxItem } from '../domain/inbox-item';
 import { isTransferKind } from '../domain/rule';
 import { useRules } from './rules-context';
+import { useApproveItem, type Approval } from './use-approve-item';
 import {
   itemFormFor,
   KIND_LABELS,
@@ -39,12 +40,6 @@ import {
 } from './rules-model';
 
 const NONE = '';
-
-type Approval = {
-  readonly form: ItemForm;
-  readonly counterAmount: string;
-  readonly changed: boolean;
-};
 
 const incomplete = () => err({ message: 'Complete the item first.' });
 
@@ -251,22 +246,7 @@ export function ItemReviewScreen() {
     exit,
     exits,
   );
-  const approve = useSubmit(
-    async ({ form, counterAmount, changed }: Approval) => {
-      const draft = toItemDraft(form);
-      if (!draft) return incomplete();
-      if (changed) {
-        const edited = await rules.editItem(id, draft);
-        if (!edited.ok) return edited;
-        // An edit can join a transfer that is already posted, which leaves nothing to approve.
-        if (edited.value.status === 'posted') return ok(undefined);
-      }
-      const approved = await rules.approveItem(id, { counterAmount });
-      return approved.ok ? ok(undefined) : approved;
-    },
-    exit,
-    exits,
-  );
+  const approve = useApproveItem(id, exit);
   const reject = useSubmit(() => rules.rejectItem(id), exit, exits);
   const dismiss = useSubmit(() => rules.dismissSplit(id), exit, exits);
 

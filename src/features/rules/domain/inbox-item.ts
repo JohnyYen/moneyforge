@@ -17,7 +17,10 @@ export type InboxItem = {
   readonly status: ItemStatus;
   readonly channel: MessageChannel;
   readonly receivedAt: string;
-  /** Null once resolved. The hash and the reference key stay, so a replay is recognized. */
+  /**
+   * Null once resolved, once expired, and for a message over the length limit. The hash and
+   * the reference key stay, so a replay is recognized.
+   */
   readonly body: string | null;
   readonly bodyHash: string;
   readonly referenceKey: string | null;
@@ -48,16 +51,45 @@ export const isResolved = ({ status }: Pick<InboxItem, 'status'>) =>
 const gapMs = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b));
 
 /**
- * True when a stored item with the same normalized body arrived within the window. The body
- * already holds the amount, so an edited amount on the stored item changes nothing here.
+ * Why a message with text already seen needs a person, or null if the text is new. Nothing
+ * without a reference can tell a copy from a second purchase, so this never decides alone.
+ * The body already holds the amount, so an edited amount on the stored item changes nothing.
  */
-export function isDuplicate(
+export function repeatNote(
   receivedAt: string,
   sameBody: readonly Pick<InboxItem, 'receivedAt'>[],
   windowMs: number,
-): boolean {
-  return sameBody.some((item) => gapMs(receivedAt, item.receivedAt) <= windowMs);
+): string | null {
+  if (sameBody.length === 0) return null;
+  const close = sameBody.some((item) => gapMs(receivedAt, item.receivedAt) <= windowMs);
+  const when = close ? `within ${Math.round(windowMs / 60_000)} minutes` : 'earlier';
+  return `Possible repeat: the same text arrived ${when}. Approve it only if this is a second movement.`;
 }
+
+/** Keeps what recognizes a replay and nothing the message said. */
+export const clearForRejection = (item: InboxItem): InboxItem => ({
+  ...item,
+  ruleId: null,
+  status: 'rejected',
+  body: null,
+  note: null,
+  kind: null,
+  accountId: null,
+  categoryId: null,
+  counterpartAccountId: null,
+  amountMinor: null,
+  currencyCode: null,
+  reference: null,
+  counterparty: null,
+  balance: null,
+  description: '',
+  autoPost: false,
+  splitMode: 'none',
+  splitStructureId: null,
+  splitRequested: false,
+  pairItemId: null,
+  transactionId: null,
+});
 
 export const pairingKind = (kind: RuleKind | null): RuleKind | null =>
   kind === 'transfer_out' ? 'transfer_in' : kind === 'transfer_in' ? 'transfer_out' : null;

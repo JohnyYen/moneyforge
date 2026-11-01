@@ -11,6 +11,7 @@ import {
   EmptyState,
   ErrorBanner,
   Muted,
+  Notice,
   Screen,
   SectionLabel,
   TextField,
@@ -24,6 +25,7 @@ import {
   NUMBER_FORMATS,
   sampleResults,
   SPLIT_OPTIONS,
+  templateCopyWarning,
   templateProblem,
   type RuleDraft,
   type SampleResult,
@@ -58,6 +60,7 @@ function SampleResultCard({ result }: { result: SampleResult }) {
 
 export function RuleForm({
   initial,
+  sourceMessage,
   accounts,
   categories,
   currencies,
@@ -68,6 +71,8 @@ export function RuleForm({
   onDelete,
 }: {
   initial: RuleDraft;
+  /** The message this rule starts from. Shown to help, and never saved with the rule. */
+  sourceMessage: string | null;
   accounts: readonly Account[];
   categories: readonly Category[];
   currencies: readonly Currency[];
@@ -93,6 +98,7 @@ export function RuleForm({
     );
   }
 
+  const copied = templateCopyWarning(draft.template, sourceMessage);
   const transfer = isTransferKind(draft.kind);
   const categoryOptions = categories
     .filter(({ kind, archived, id }) => kind === draft.kind && (!archived || id === draft.categoryId))
@@ -100,6 +106,13 @@ export function RuleForm({
 
   return (
     <Screen>
+      {sourceMessage ? (
+        <>
+          <SectionLabel>Message</SectionLabel>
+          <Muted>{sourceMessage}</Muted>
+          <Muted>This is only a guide. It is not saved with the rule.</Muted>
+        </>
+      ) : null}
       <TextField
         label="Name"
         value={draft.name}
@@ -118,6 +131,7 @@ export function RuleForm({
         {'{reference}'}, {'{counterparty}'}, {'{balance}'}, or {'{*}'} for anything else.
       </Muted>
       <ErrorBanner message={templateProblem(draft.template)} />
+      {copied ? <Notice>{copied}</Notice> : null}
       <ChoiceChips
         label="Number format"
         options={NUMBER_FORMATS.map(({ label, format }) => ({

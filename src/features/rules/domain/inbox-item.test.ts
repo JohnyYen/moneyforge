@@ -1,4 +1,10 @@
-import { inboxSections, isDuplicate, pickPair, type InboxItem } from './inbox-item';
+import {
+  clearForRejection,
+  inboxSections,
+  pickPair,
+  repeatNote,
+  type InboxItem,
+} from './inbox-item';
 
 const HOUR = 3_600_000;
 const start = '2026-03-10T12:00:00.000Z';
@@ -43,21 +49,25 @@ const opposite = (over: Partial<InboxItem> = {}) =>
     ...over,
   });
 
-describe('isDuplicate', () => {
+describe('repeatNote', () => {
   const later = hoursLater(1);
 
-  it('matches the same body inside the window, in either direction', () => {
-    expect(isDuplicate(later, [item()], 2 * HOUR)).toBe(true);
-    expect(isDuplicate(start, [item({ receivedAt: later })], 2 * HOUR)).toBe(true);
+  it('stays silent with no stored item', () => {
+    expect(repeatNote(later, [], HOUR)).toBeNull();
   });
 
-  it('includes the window boundary and nothing past it', () => {
-    expect(isDuplicate(later, [item()], HOUR)).toBe(true);
-    expect(isDuplicate(later, [item()], HOUR - 1)).toBe(false);
+  it('says how close a repeat inside the window is, in either direction', () => {
+    expect(repeatNote(later, [item()], 2 * HOUR)).toMatch(/possible repeat.*120 minutes/i);
+    expect(repeatNote(start, [item({ receivedAt: later })], 2 * HOUR)).toMatch(/120 minutes/);
   });
 
-  it('finds nothing with no stored item', () => {
-    expect(isDuplicate(later, [], HOUR)).toBe(false);
+  it('includes the window boundary', () => {
+    expect(repeatNote(later, [item()], HOUR)).toMatch(/60 minutes/);
+    expect(repeatNote(later, [item()], HOUR - 1)).not.toMatch(/minutes/);
+  });
+
+  it('still flags the same text outside the window', () => {
+    expect(repeatNote(later, [item()], 60_000)).toMatch(/possible repeat/i);
   });
 });
 
@@ -101,12 +111,36 @@ describe('pickPair', () => {
     expect(pickPair(item(), [item()], window)).toBeNull();
   });
 
+  it('searches any distance with no window limit', () => {
+    const far = opposite({ receivedAt: hoursLater(5000) });
+    expect(pickPair(item(), [far], Number.POSITIVE_INFINITY)?.id).toBe('i2');
+  });
+
   it('takes the oldest candidate, then the lowest id', () => {
     const older = opposite({ id: 'z', receivedAt: hoursLater(-1) });
     const newer = opposite({ id: 'a', receivedAt: hoursLater(1) });
     expect(pickPair(item(), [newer, older], window)?.id).toBe('z');
     const sameTime = [opposite({ id: 'y' }), opposite({ id: 'x' })];
     expect(pickPair(item(), sameTime, window)?.id).toBe('x');
+  });
+});
+
+describe('clearForRejection', () => {
+  it('keeps only what identifies the message for dedup', () => {
+    const cleared = clearForRejection(
+      item({ referenceKey: 'key', counterparty: 'Acme', reference: 'R', balance: '5', pairItemId: 'x' }),
+    );
+    expect(cleared).toEqual({
+      ...item({ referenceKey: 'key' }),
+      ruleId: null,
+      status: 'rejected',
+      body: null,
+      kind: null,
+      accountId: null,
+      counterpartAccountId: null,
+      amountMinor: null,
+      currencyCode: null,
+    });
   });
 });
 

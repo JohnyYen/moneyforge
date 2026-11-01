@@ -85,6 +85,7 @@ export function RuleEditorScreen() {
         return (
           <RuleForm
             initial={initial}
+            sourceMessage={rule ? null : (item?.body ?? null)}
             accounts={accounts}
             categories={categories}
             currencies={currencies}

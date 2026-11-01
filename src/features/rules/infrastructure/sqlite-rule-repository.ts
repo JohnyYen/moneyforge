@@ -185,6 +185,13 @@ const SAVE_ITEM = `
 
 const UNRESOLVED = `status IN ('unmatched', 'proposed', 'waiting_pair')`;
 
+const UNPAIRED_SIDE = `pair_item_id IS NULL
+  AND (status IN ('waiting_pair', 'proposed')
+    OR (status = 'posted' AND transaction_id IS NOT NULL))`;
+
+const EXPIRED = `received_at < ?
+  AND (status = 'unmatched' OR (${UNRESOLVED} AND body IS NOT NULL))`;
+
 export function createSqliteRuleRepository(sql: SqlExecutor): RuleRepository {
   const oneItem = async (query: string, params: readonly SqlValue[]) => {
     const row = await sql.get<ItemRow>(query, params);
@@ -192,10 +199,10 @@ export function createSqliteRuleRepository(sql: SqlExecutor): RuleRepository {
   };
   const manyItems = async (query: string, params: readonly SqlValue[] = []) =>
     (await sql.all<ItemRow>(query, params)).map(toItem);
-  const countUnresolvedBefore = async (cutoff: string) =>
+  const countExpired = async (cutoff: string) =>
     (
       await sql.get<{ total: number }>(
-        `SELECT COUNT(*) AS total FROM inbox_items WHERE ${UNRESOLVED} AND received_at < ?`,
+        `SELECT COUNT(*) AS total FROM inbox_items WHERE ${EXPIRED}`,
         [cutoff],
       )
     )?.total ?? 0;
@@ -305,22 +312,20 @@ export function createSqliteRuleRepository(sql: SqlExecutor): RuleRepository {
     listPairCandidates: (kind, from, to) =>
       manyItems(
         `SELECT * FROM inbox_items
-         WHERE kind = ? AND received_at >= ? AND received_at <= ? AND pair_item_id IS NULL
-           AND (status = 'waiting_pair' OR (status = 'posted' AND transaction_id IS NOT NULL))`,
+         WHERE kind = ? AND received_at >= ? AND received_at <= ? AND ${UNPAIRED_SIDE}`,
         [kind, from, to],
       ),
 
+    listUnpairedSides: (kind) =>
+      manyItems(`SELECT * FROM inbox_items WHERE kind = ? AND ${UNPAIRED_SIDE}`, [kind]),
+
     purgeUnresolvedBefore: async (cutoff) => {
-      const total = await countUnresolvedBefore(cutoff);
+      const total = await countExpired(cutoff);
       if (total === 0) return 0;
-      await sql.run(
-        `UPDATE inbox_items SET status = 'waiting_pair', pair_item_id = NULL
-         WHERE ${UNRESOLVED} AND received_at >= ? AND pair_item_id IN (
-           SELECT id FROM inbox_items WHERE ${UNRESOLVED} AND received_at < ?
-         )`,
-        [cutoff, cutoff],
-      );
-      await sql.run(`DELETE FROM inbox_items WHERE ${UNRESOLVED} AND received_at < ?`, [cutoff]);
+      await sql.run(`DELETE FROM inbox_items WHERE status = 'unmatched' AND received_at < ?`, [
+        cutoff,
+      ]);
+      await sql.run(`UPDATE inbox_items SET body = NULL WHERE ${EXPIRED}`, [cutoff]);
       return total;
     },
   };
