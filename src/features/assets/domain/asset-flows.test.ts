@@ -108,9 +108,8 @@ describe('expectedAssetFlows', () => {
 
   it.each<[string, Partial<StreamPayment>]>([
     ['another stream', { streamId: 's2' }],
-    ['another date', { dueOn: '2026-02-15' }],
+    ['a payment dated to another date', { day: '2026-02-15', dueOn: '2026-02-15' }],
     ['no stream', { streamId: null, dueOn: null }],
-    ['too little money', { minor: 1_00n }],
     ['a payment that became an expense', { kind: 'expense' }],
     ['a payment that became a transfer', { kind: 'transfer' }],
   ])('keeps a date covered only by %s', (_, change) => {
@@ -121,6 +120,42 @@ describe('expectedAssetFlows', () => {
     const half = { minor: 5_00n };
     const payments = [payment({ ...half }), payment({ ...half, transactionId: 't2' })];
     expect(flows({ payments }).map(({ day }) => day)).toEqual(['2026-04-15', '2026-05-15']);
+  });
+
+  it('projects what is left of a date paid in part', () => {
+    const left = flows({ payments: [payment({ minor: 4_00n })] });
+    expect(left.map(({ day, minor }) => [day, minor])).toEqual([
+      ['2026-03-15', 6_00n],
+      ['2026-04-15', 10_00n],
+      ['2026-05-15', 10_00n],
+    ]);
+  });
+
+  it('adds up what several payments left of a date', () => {
+    const payments = [
+      payment({ minor: 4_00n }),
+      payment({ minor: 1_00n, transactionId: 't2', day: '2026-03-16' }),
+    ];
+    expect(flows({ payments })[0]).toMatchObject({ day: '2026-03-15', minor: 5_00n });
+  });
+
+  it('places payments by what they are worth now, not where a stored date left them', () => {
+    const usd: Currency = { code: 'USD', name: 'Dollar', decimals: 2, symbol: '$', kind: 'fiat' };
+    const eur: Currency = { ...usd, code: 'EUR', name: 'Euro' };
+    const inEuros = { currency: 'EUR', dueOn: '2026-03-15' };
+    const left = expectedAssetFlows({
+      assets: [asset()],
+      streams: [stream({ schedule: { ...monthly, startOn: '2026-03-15' } })],
+      // Both were placed on one date while no rate could measure them.
+      payments: [
+        payment({ ...inEuros, transactionId: 't1', day: '2026-03-14' }),
+        payment({ ...inEuros, transactionId: 't2', day: '2026-03-16' }),
+      ],
+      rates: [{ id: 'r', fromCode: 'EUR', toCode: 'USD', rate: '1', effectiveOn: '2026-01-01' }],
+      currencies: [usd, eur],
+      ...range,
+    });
+    expect(left.map(({ day }) => day)).toEqual(['2026-05-15']);
   });
 
   it('passes the category on, so a budget can recognize the flow', () => {
@@ -141,6 +176,15 @@ describe('expectedAssetFlows', () => {
     it('leaves out a past date that was paid', () => {
       const payments = [payment({ kind: 'expense', dueOn: '2026-02-15', day: '2026-02-15' })];
       expect(days({ payments })).toEqual([today, today, '2026-04-15', '2026-05-15']);
+    });
+
+    it('carries only what is left of a date paid in part', () => {
+      const partial = payment({ kind: 'expense', dueOn: '2026-02-15', day: '2026-02-15', minor: 7_00n });
+      const carried = flows({ streams: [rent], from: today, payments: [partial] });
+      expect(carried.slice(0, 2).map(({ day, minor }) => [day, minor])).toEqual([
+        [today, -10_00n],
+        [today, -3_00n],
+      ]);
     });
 
     it('looks back 90 days at most', () => {

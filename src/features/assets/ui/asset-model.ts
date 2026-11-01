@@ -225,6 +225,12 @@ export function projectionNotices(input: {
   });
 }
 
+/** Messages to show, once each, because a message also keys its row. */
+export function shownNotices(notices: readonly ProjectionNotice[], assetId?: string): string[] {
+  const shown = notices.filter((notice) => !assetId || notice.assetId === assetId);
+  return [...new Set(shown.map(({ message }) => message))];
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function rangeLabel(from: Day, to: Day): string {

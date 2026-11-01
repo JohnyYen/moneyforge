@@ -40,19 +40,6 @@ function addPaid(paid: Map<Day, bigint>, dueOn: Day, minor: bigint): bigint {
   return total;
 }
 
-/** Dates whose payments reach the amount of the stream. */
-function coveredDates(
-  stream: ExpectedStream,
-  payments: readonly StreamPayment[],
-  measure: PaymentMeasure,
-): ReadonlySet<Day> {
-  const paid = new Map<Day, bigint>();
-  for (const payment of paymentsOf(stream, payments)) {
-    if (payment.dueOn) addPaid(paid, payment.dueOn, measure(payment));
-  }
-  return new Set([...paid].flatMap(([day, total]) => (total >= stream.amount ? [day] : [])));
-}
-
 /**
  * The date each payment of a stream fulfils, by transaction, oldest payment first so the answer
  * does not depend on the order they were linked in. A date stays open to further payments until
@@ -80,9 +67,28 @@ export function assignDueDates(
 }
 
 /**
+ * What is paid towards each date. Placed afresh, because a rate saved after a stored `dueOn` was
+ * written can change what a payment is worth, and with it which date the next payment takes.
+ */
+function paidByDate(
+  stream: ExpectedStream,
+  payments: readonly StreamPayment[],
+  measure: PaymentMeasure,
+): ReadonlyMap<Day, bigint> {
+  const assigned = assignDueDates(stream, payments, measure);
+  const paid = new Map<Day, bigint>();
+  for (const payment of paymentsOf(stream, payments)) {
+    const dueOn = assigned.get(payment.transactionId);
+    if (dueOn) addPaid(paid, dueOn, measure(payment));
+  }
+  return paid;
+}
+
+/**
  * What streams will bring to their accounts. An asset with no account has nowhere to project to,
- * and a date linked transactions cover is real money, already in a balance. An unpaid expense is
- * still owed, so its recent dates count today. Income is not assumed to still be coming.
+ * and what linked transactions paid towards a date is real money, already in a balance, so only
+ * the rest of each date counts. An unpaid expense is still owed, so its recent dates count today.
+ * Income is not assumed to still be coming.
  */
 export function expectedAssetFlows(
   input: ConversionContext & {
@@ -99,21 +105,18 @@ export function expectedAssetFlows(
     if (!asset?.accountId) return [];
     const { accountId } = asset;
     const { categoryId, kind } = stream;
-    const minor = kind === 'income' ? stream.amount : -stream.amount;
     const label = `${asset.name}: ${stream.name}`;
-    const measure = paymentMeasure(asset.currencyCode, context);
-    const covered = coveredDates(stream, payments, measure);
-    const uncovered = (first: Day, last: Day) =>
-      streamDates(stream, asset, first, last).filter((day) => !covered.has(day));
+    const paid = paidByDate(stream, payments, paymentMeasure(asset.currencyCode, context));
+    const owed = (first: Day, last: Day, on?: Day) =>
+      streamDates(stream, asset, first, last).flatMap((date) => {
+        const left = stream.amount - (paid.get(date) ?? 0n);
+        if (left <= 0n) return [];
+        const minor = kind === 'income' ? left : -left;
+        return [{ day: on ?? date, accountId, minor, label, categoryId }];
+      });
     const overdue =
-      kind === 'expense' ? uncovered(addDays(from, -OVERDUE_LOOKBACK_DAYS), addDays(from, -1)) : [];
-    return [...overdue.map(() => from), ...uncovered(from, to)].map((day) => ({
-      day,
-      accountId,
-      minor,
-      label,
-      categoryId,
-    }));
+      kind === 'expense' ? owed(addDays(from, -OVERDUE_LOOKBACK_DAYS), addDays(from, -1), from) : [];
+    return [...overdue, ...owed(from, to)];
   });
 }
 

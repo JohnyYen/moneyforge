@@ -13,6 +13,7 @@ import {
   NO_SELECTION,
   percentLabel,
   projectionNotices,
+  shownNotices,
   rangeLabel,
   reportRange,
   toAssetDraft,
@@ -188,6 +189,20 @@ describe('linkAfterSave', () => {
     const notice = await linkAfterSave({ id: 't1', kind: 'transfer' }, selection, link);
     expect(notice).toMatch(/not linked/);
     expect(link).not.toHaveBeenCalled();
+  });
+});
+
+describe('shownNotices', () => {
+  const notice = (assetId: string, message: string) => ({ assetId, message });
+
+  it('keeps every asset with none named, and one asset when named', () => {
+    const notices = [notice('a1', 'One'), notice('a2', 'Two')];
+    expect(shownNotices(notices)).toEqual(['One', 'Two']);
+    expect(shownNotices(notices, 'a2')).toEqual(['Two']);
+  });
+
+  it('says a repeated message once, since it also keys the row', () => {
+    expect(shownNotices([notice('a1', 'One'), notice('a2', 'One')])).toEqual(['One']);
   });
 });
 

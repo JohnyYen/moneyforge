@@ -353,7 +353,7 @@ describe('assets', () => {
 
       await expect(services.assets.getLink(transaction.id)).resolves.toMatchObject({ dueOn: TODAY });
       const projection = unwrap(await services.planning.projectCashFlow(horizon));
-      expect(projection.accounts[0].balances[0]).toBe(250_00n);
+      expect(projection.accounts[0].balances[0]).toBe(150_00n);
     });
 
     it('stops linking once the rule link is removed, and a removed rule drops it', async () => {
@@ -570,7 +570,7 @@ describe('assets', () => {
       expect(projection.accounts[0].balances).toEqual([100_00n, 100_00n, 100_00n]);
     });
 
-    it('needs the whole amount to cover a date, across payments', async () => {
+    it('projects what is left of a date until payments reach its amount', async () => {
       const bank = await account('Bank');
       const flat = await asset({ accountId: bank });
       const schedule = monthlyFrom(TODAY);
@@ -588,9 +588,9 @@ describe('assets', () => {
         unwrap(await services.planning.projectCashFlow(horizon)).accounts[0].balances[0];
 
       await expect(linked('1')).resolves.toBe(TODAY);
-      await expect(expectedToday()).resolves.toBe(1001_00n);
+      await expect(expectedToday()).resolves.toBe(1000_00n);
       await expect(linked('500')).resolves.toBe(TODAY);
-      await expect(expectedToday()).resolves.toBe(1501_00n);
+      await expect(expectedToday()).resolves.toBe(1000_00n);
       await expect(linked('499')).resolves.toBe(TODAY);
       await expect(expectedToday()).resolves.toBe(1000_00n);
       await expect(linked('1000')).resolves.toBe('2026-04-10');
@@ -617,7 +617,7 @@ describe('assets', () => {
         unwrap(await services.planning.projectCashFlow(horizon)).accounts[0].balances[0];
 
       unwrap(await edit({ amount: '60' }));
-      await expect(today()).resolves.toBe(160_00n);
+      await expect(today()).resolves.toBe(100_00n);
 
       unwrap(await edit({ amount: '100' }));
       await expect(today()).resolves.toBe(100_00n);
