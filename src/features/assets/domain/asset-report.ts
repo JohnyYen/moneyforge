@@ -33,10 +33,10 @@ export type AssetReport = {
   /** Both totals are in the currency of the asset. */
   readonly actual: FlowTotals;
   readonly expected: FlowTotals;
-  /** Actual net less expected net. */
-  readonly difference: bigint;
+  /** Actual net less expected net. Empty while `actual` leaves a currency out. */
+  readonly difference: bigint | null;
   readonly latest: Valuation | null;
-  /** Net over the latest value. Empty with no value, or while `actual` leaves a currency out. */
+  /** Net over the latest value by the end of the period. Empty with no value, or while `actual` leaves a currency out. */
   readonly netYield: ExactRate | null;
   /** While this has entries, `actual` leaves those currencies out. */
   readonly missingRates: readonly string[];
@@ -61,14 +61,14 @@ export function computeAssetReport(
   const actual = summarize(movements);
   const { startOn, endOn } = period;
   const expected = summarize(expectedMovements(asset, streams, startOn, endOn)).base;
-  const latest = latestValuation(valuations);
+  const latest = latestValuation(valuations.filter(({ valuedOn }) => valuedOn <= endOn));
   const complete = actual.missingRates.length === 0;
   return {
     asset,
     period,
     actual: actual.base,
     expected,
-    difference: actual.base.net - expected.net,
+    difference: complete ? actual.base.net - expected.net : null,
     latest,
     netYield: latest && complete ? exactRatio(actual.base.net, latest.amount) : null,
     missingRates: actual.missingRates,

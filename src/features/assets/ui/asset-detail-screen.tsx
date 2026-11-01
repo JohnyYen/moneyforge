@@ -33,6 +33,7 @@ import {
   valuationRow,
   type ReportRange,
 } from './asset-model';
+import { AssetProjectionNotices } from './asset-projection-notices';
 import { useAssets } from './assets-context';
 
 const RANGE_OPTIONS = REPORT_RANGES.map((value) => ({ value, label: REPORT_RANGE_LABELS[value] }));
@@ -95,7 +96,10 @@ export function AssetDetailScreen() {
             <ListRow title="Income" subtitle={`Expected ${show(expected.income)}`} trailing={show(actual.income)} />
             <ListRow title="Expense" subtitle={`Expected ${show(expected.expense)}`} trailing={show(actual.expense)} />
             <ListRow title="Net" subtitle={`Expected ${show(expected.net)}`} trailing={show(actual.net)} />
-            <ListRow title="Against expected" trailing={show(difference)} />
+            <ListRow
+              title="Against expected"
+              trailing={difference === null ? 'Not available' : show(difference)}
+            />
             <ListRow title="Net yield on latest value" trailing={percentLabel(netYield) ?? 'Not available'} />
             {missing ? <Notice>{missing}</Notice> : null}
 
@@ -119,7 +123,7 @@ export function AssetDetailScreen() {
             />
 
             <SectionLabel>Expected cash flow</SectionLabel>
-            {asset.accountId ? null : <Muted>Link an account to see these in the projection.</Muted>}
+            <AssetProjectionNotices assetId={asset.id} />
             {streams.map((stream) => (
               <ListRow
                 key={stream.id}

@@ -45,6 +45,7 @@ const rent: ExpectedStream = {
   name: 'Rent',
   kind: 'income',
   amount: 100_00n,
+  categoryId: null,
   schedule: { unit: 'month', every: 1, startOn: '2026-01-05', endOn: null, dayOfMonth: null },
 };
 
@@ -126,6 +127,18 @@ describe('computeAssetReport', () => {
     expect(result.missingRates).toEqual(['COP']);
     expect(result.actual.expense).toBe(0n);
     expect(result.netYield).toBeNull();
+  });
+
+  it('has no difference on a partial net', () => {
+    const result = report([moved('income', 90_00n), moved('expense', 5_00n, 'COP')]);
+    expect(result.difference).toBeNull();
+  });
+
+  it('ignores a value dated after the period', () => {
+    const later = value(10_000_00n, { id: 'v2', valuedOn: '2026-04-01' });
+    const result = report([moved('income', 100_00n)], { valuations: [value(40_000_00n), later] });
+    expect(result.latest?.id).toBe('v1');
+    expect(result.netYield).toEqual({ numerator: 1n, denominator: 400n });
   });
 
   it('uses the latest value, and has no yield with no value', () => {

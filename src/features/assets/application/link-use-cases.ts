@@ -1,11 +1,12 @@
-import { toLocalDay } from '@/features/ledger/application/overview-use-cases';
+import type { TransactionChangeGuard } from '@/features/ledger/application/ports';
 import type { Transaction } from '@/features/ledger/domain/journal';
+import { recordedAmount } from '@/features/planning/application/recorded-movements';
 import { err, ok, type Result } from '@/shared/result';
 
-import { type ExpectedStream, type TransactionLink } from '../domain/asset';
+import type { ExpectedStream, StreamPayment, TransactionLink } from '../domain/asset';
 import { assetError, type AssetError } from '../domain/asset-error';
-import { nearestDue } from '../domain/asset-flows';
-import type { AssetDeps, AssetRepository } from './ports';
+import { assignDueDates, paymentMeasure } from '../domain/asset-flows';
+import type { AssetDeps, AssetRepositories, AssetRepository } from './ports';
 
 export type LinkInput = {
   readonly transactionId: string;
@@ -20,17 +21,60 @@ const notFound = (what: string) => err(assetError('not-found', `${what} not foun
 
 const isCashFlow = ({ kind }: Transaction) => kind === 'income' || kind === 'expense';
 
-/** The stream's closest date no other transaction fulfils. */
-async function dueDateFor(
-  assets: AssetRepository,
+/** Everything `refreshStream` reads, which a hook bound to one write can also supply. */
+type LinkRepositories = Pick<AssetRepositories, 'assets' | 'currencies' | 'exchangeRates'>;
+
+type PaymentChange = (payment: StreamPayment) => StreamPayment[];
+
+/**
+ * Gives every payment of a stream its date again, from what the transactions say now. `change`
+ * shows one as it is about to be, for a guard that runs before the write. Awaits only the
+ * database, so it can run inside a write.
+ */
+export async function refreshStream(
+  { assets, currencies, exchangeRates }: LinkRepositories,
   stream: ExpectedStream,
-  transaction: Transaction,
-): Promise<string | null> {
-  const others = (await assets.listLinks()).filter(
-    ({ streamId, transactionId }) => streamId === stream.id && transactionId !== transaction.id,
-  );
-  const taken = new Set(others.flatMap(({ dueOn }) => (dueOn ? [dueOn] : [])));
-  return nearestDue(stream.schedule, toLocalDay(new Date(transaction.occurredAt)), taken);
+  change: PaymentChange = (payment) => [payment],
+): Promise<void> {
+  const asset = await assets.getAsset(stream.assetId);
+  if (!asset) return;
+  const context = { rates: await exchangeRates.list(), currencies: await currencies.list() };
+  const payments = (await assets.listPayments())
+    .filter(({ streamId }) => streamId === stream.id)
+    .flatMap(change);
+  const assigned = assignDueDates(stream, payments, paymentMeasure(asset.currencyCode, context));
+  for (const { transactionId, assetId, streamId, dueOn } of payments) {
+    const next = assigned.get(transactionId) ?? null;
+    if (next !== dueOn) await assets.saveLink({ transactionId, assetId, streamId, dueOn: next });
+  }
+}
+
+async function refreshStreamOf(
+  repositories: LinkRepositories,
+  streamId: string | null | undefined,
+  change?: PaymentChange,
+): Promise<void> {
+  const stream = streamId ? await repositories.assets.getStream(streamId) : null;
+  if (stream) await refreshStream(repositories, stream, change);
+}
+
+/** Keeps stream dates true to edited transactions, in the write that changes them. */
+export function createAssetChangeGuard(repositories: LinkRepositories): TransactionChangeGuard {
+  const refreshFor = async (id: string, change: PaymentChange) => {
+    const link = await repositories.assets.getLink(id);
+    await refreshStreamOf(repositories, link?.streamId, change);
+    return ok(undefined);
+  };
+  return {
+    beforeUpdate: (_, next) =>
+      refreshFor(next.id, (payment) => {
+        if (payment.transactionId !== next.id) return [payment];
+        const amount = recordedAmount(next);
+        return amount ? [{ ...payment, ...amount, kind: next.kind }] : [];
+      }),
+    beforeDelete: ({ id }) =>
+      refreshFor(id, (payment) => (payment.transactionId === id ? [] : [payment])),
+  };
 }
 
 /**
@@ -38,10 +82,11 @@ async function dueDateFor(
  * can no longer apply is skipped: the entry must post either way, and it can be linked by hand.
  */
 export async function linkFromRule(
-  assets: AssetRepository,
+  repositories: LinkRepositories,
   ruleId: string,
   transaction: Transaction,
 ): Promise<void> {
+  const { assets } = repositories;
   const link = await assets.getRuleLink(ruleId);
   if (!link || !isCashFlow(transaction)) return;
   const stream = link.streamId ? await assets.getStream(link.streamId) : null;
@@ -50,8 +95,9 @@ export async function linkFromRule(
     transactionId: transaction.id,
     assetId: link.assetId,
     streamId: fulfils?.id ?? null,
-    dueOn: fulfils ? await dueDateFor(assets, fulfils, transaction) : null,
+    dueOn: null,
   });
+  if (fulfils) await refreshStream(repositories, fulfils);
 }
 
 async function streamOf(
@@ -81,7 +127,8 @@ export function createLinkUseCases({ store }: AssetDeps) {
 
     /** Linking again moves it. A stream date comes from the transaction's own day. */
     linkTransaction: (input: LinkInput): Promise<Result<TransactionLink, AssetError>> =>
-      store.atomic(async ({ assets, journal }) => {
+      store.atomic(async (repositories) => {
+        const { assets, journal } = repositories;
         const { transactionId, assetId, streamId } = input;
         const transaction = await journal.get(transactionId);
         if (!transaction) return notFound('Transaction');
@@ -92,16 +139,23 @@ export function createLinkUseCases({ store }: AssetDeps) {
         if (stream.value && stream.value.kind !== transaction.kind) {
           return invalid(`Choose an ${transaction.kind} stream.`);
         }
-        const dueOn = stream.value ? await dueDateFor(assets, stream.value, transaction) : null;
-        const link = { transactionId, assetId, streamId, dueOn };
-        await assets.saveLink(link);
-        return ok(link);
+        const previous = await assets.getLink(transactionId);
+        await assets.saveLink({ transactionId, assetId, streamId, dueOn: null });
+        await refreshStreamOf(repositories, streamId);
+        if (previous?.streamId !== streamId) {
+          await refreshStreamOf(repositories, previous?.streamId);
+        }
+        const link = await assets.getLink(transactionId);
+        return link ? ok(link) : notFound('Link');
       }),
 
-    unlinkTransaction: async (transactionId: string): Promise<Result<void, AssetError>> => {
-      await store.assets.removeLink(transactionId);
-      return ok(undefined);
-    },
+    unlinkTransaction: (transactionId: string): Promise<Result<void, AssetError>> =>
+      store.atomic(async (repositories) => {
+        const link = await repositories.assets.getLink(transactionId);
+        await repositories.assets.removeLink(transactionId);
+        await refreshStreamOf(repositories, link?.streamId);
+        return ok(undefined);
+      }),
 
     listRuleLinks: async (assetId: string) =>
       (await store.assets.listRuleLinks()).filter((link) => link.assetId === assetId),

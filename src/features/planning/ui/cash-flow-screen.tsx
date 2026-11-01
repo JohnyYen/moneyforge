@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { View } from 'react-native';
 
 import { useLedger } from '@/features/ledger/ui/ledger-context';
@@ -43,7 +43,7 @@ const BUDGET_OPTIONS = [
 const HISTORY_COUNT = 6;
 const MAX_BARS = 60;
 
-export function CashFlowScreen() {
+export function CashFlowScreen({ projectionExtra }: { projectionExtra?: ReactNode }) {
   const planning = usePlanning();
   const ledger = useLedger();
   const router = useRouter();
@@ -105,6 +105,7 @@ export function CashFlowScreen() {
               <Notice>{firstNegativeLabel(total.firstNegativeOn)}</Notice>
             ) : null}
             {missing ? <Notice>{missing}</Notice> : null}
+            {projectionExtra}
             {projection.accounts.map(({ accountId, currency, balances, firstNegativeOn }) => {
               const details = currencies.get(currency);
               const last = balances[balances.length - 1];

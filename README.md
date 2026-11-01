@@ -139,11 +139,12 @@ The Assets tab holds what you own beyond your accounts. Asset types are user dat
 
 - An asset has a type, a currency, an optional linked account in that currency, and notes. Its currency stays fixed once created. Marking it sold stops its expected flows from that date.
 - Values are dated manual entries, and the latest one is the current value. A value is not cash, so it never reaches the ledger.
-- Expected flows are income or expense streams with the same schedule as recurring items.
-- Actual cash flow is the income and expenses linked to an asset: from the transaction form, later from the transaction's screen, or by a message rule. A link survives edits to the transaction and goes when it is deleted. A link to a stream also marks the stream date closest to the transaction as fulfilled.
-- A report for a period shows actual and expected income, expense, and net, plus net yield on the latest value. Linked entries in another currency convert at the rate of their day into the currency of the asset. A currency with no rate is reported, never read as zero, and the yield stays empty until it has one.
+- Expected flows are income or expense streams with the same schedule as recurring items. An expense stream can carry a category, so a budget on that category does not reserve the same money again.
+- Actual cash flow is the income and expenses linked to an asset: from the transaction form, later from the transaction's screen, or by a message rule. A link survives edits to the transaction and goes when it is deleted. A link to a stream also places the transaction on a stream date: an open date within half a step before it, otherwise the closest open date. A date is covered once linked amounts of the stream's kind reach the stream amount, so two payments of 500 cover a date of 1000, and until then further payments stay on that date. Dates follow edits to the transaction or to the stream.
+- A report for a period shows actual and expected income, expense, and net, plus net yield on the latest value by the end of the period. Linked entries in another currency convert at the rate of their day into the currency of the asset. A currency with no rate is reported, never read as zero, and the yield and the difference from expected stay empty until it has one.
 - The portfolio totals active assets at today's rate and nets this month's linked cash flow, in the base currency. Net worth stays accounts only, and "Include assets" shows a second total.
-- The cash flow projection adds streams of assets with a linked account, except dates already fulfilled.
+- The cash flow projection adds streams of assets with a linked account, except covered dates. Uncovered expense dates from the last 90 days count today. Past income does not. A date with part of its amount paid still projects in full.
+- The asset and the projection show a notice when a stream stays out: an archived account, no linked account, or no account in the asset's currency. They also show one when a stream looks like a recurring item on the same account: same kind, amount, and cadence, in overlapping date ranges. Nothing merges them.
 
 ## License
 

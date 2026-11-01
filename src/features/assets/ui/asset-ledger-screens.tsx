@@ -1,9 +1,11 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
+import { Alert } from 'react-native';
 
 import type { Transaction } from '@/features/ledger/domain/journal';
 import { formatDisplay } from '@/features/ledger/domain/money';
 import { useLedger } from '@/features/ledger/ui/ledger-context';
+import { CashFlowScreen } from '@/features/planning/ui/cash-flow-screen';
 import { missingRatesLabel } from '@/features/planning/ui/plan-model';
 import { MainScreen } from '@/features/rules/ui/main-screen';
 import { NewTransactionScreen, TransactionScreen } from '@/features/split/ui/ledger-screens';
@@ -18,13 +20,19 @@ import {
   SectionLabel,
   Title,
 } from '@/shared/ui/primitives';
-import { unwrapOrThrow } from '@/shared/ui/unwrap';
 import { useFocusQuery } from '@/shared/ui/use-focus-query';
 import { useSubmit } from '@/shared/ui/use-submit';
 
 import type { LinkInput } from '../application/link-use-cases';
 import { AssetLinkFields } from './asset-link-fields';
-import { linkInputFor, NO_SELECTION, type AssetSelection } from './asset-model';
+import {
+  droppedSelectionNotice,
+  linkAfterSave,
+  linkInputFor,
+  NO_SELECTION,
+  type AssetSelection,
+} from './asset-model';
+import { AssetProjectionNotices } from './asset-projection-notices';
 import { useAssets } from './assets-context';
 
 const YES_NO = [
@@ -73,13 +81,17 @@ export function MainScreenWithAssets() {
   return <MainScreen summaryExtra={<NetWorthWithAssets />} />;
 }
 
+export function CashFlowWithAssets() {
+  return <CashFlowScreen projectionExtra={<AssetProjectionNotices />} />;
+}
+
 export function NewTransactionWithAsset() {
   const assets = useAssets();
   const [selection, setSelection] = useState(NO_SELECTION);
 
   const link = async (transaction: Transaction) => {
-    const input = linkInputFor(transaction, selection);
-    if (input) unwrapOrThrow(await assets.linkTransaction(input));
+    const notice = await linkAfterSave(transaction, selection, assets.linkTransaction);
+    if (notice) Alert.alert(notice);
   };
 
   return (
@@ -101,6 +113,7 @@ function TransactionAssetSection({ transaction }: { transaction: Transaction }) 
   }, [assets, id]);
   const { state, reload } = useFocusQuery(load);
   const input = linkInputFor(transaction, selection);
+  const dropped = droppedSelectionNotice(transaction, selection);
   const save = useSubmit((link: LinkInput) => assets.linkTransaction(link), reload);
   const unlink = useSubmit(() => assets.unlinkTransaction(id), reload);
 
@@ -130,6 +143,7 @@ function TransactionAssetSection({ transaction }: { transaction: Transaction }) 
           ) : (
             <>
               <AssetLinkFields value={selection} onChange={setSelection} />
+              {dropped ? <Notice>{dropped}</Notice> : null}
               {input ? (
                 <Button
                   label="Link to asset"

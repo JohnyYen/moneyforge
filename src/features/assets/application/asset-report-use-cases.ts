@@ -55,12 +55,14 @@ export function createAssetReportUseCases({ store, clock }: AssetDeps) {
 
   const expectedSource: ExpectedCashFlowSource = {
     async expectedFlows({ from, to }) {
-      const [assets, streams, links] = await Promise.all([
+      const [assets, streams, payments, rates, currencies] = await Promise.all([
         store.assets.listAssets(),
         store.assets.listStreams(),
-        store.assets.listLinks(),
+        store.assets.listPayments(),
+        store.exchangeRates.list(),
+        store.currencies.list(),
       ]);
-      return expectedAssetFlows({ assets, streams, links, from, to });
+      return expectedAssetFlows({ assets, streams, payments, rates, currencies, from, to });
     },
   };
 

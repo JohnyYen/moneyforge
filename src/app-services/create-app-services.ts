@@ -1,5 +1,6 @@
 import { createAssetService } from '@/features/assets/application/asset-service';
 import {
+  assetChangeGuard,
   assetCurrencyUsage,
   assetRulePostHook,
   createSqliteAssetStore,
@@ -20,6 +21,7 @@ import {
 import type { SecretGenerator } from '@/features/rules/application/ports';
 import {
   createSqliteLedgerStore,
+  type ChangeGuardFactory,
   type CurrencyUsageFactory,
 } from '@/features/ledger/infrastructure/sqlite-ledger-store';
 import { createRulesService } from '@/features/rules/application/rules-service';
@@ -35,6 +37,21 @@ const currencyUsage: CurrencyUsageFactory = (sql) => {
   const [planning, assets] = [planningCurrencyUsage(sql), assetCurrencyUsage(sql)];
   return {
     isInUse: async (code) => (await planning.isInUse(code)) || assets.isInUse(code),
+  };
+};
+
+/** Split may refuse, and refusing must come before any write, so assets adapt after it. */
+const transactionGuard: ChangeGuardFactory = (sql) => {
+  const [split, assets] = [splitChangeGuard(sql), assetChangeGuard(sql)];
+  return {
+    beforeUpdate: async (existing, next, options) => {
+      const allowed = await split.beforeUpdate(existing, next, options);
+      return allowed.ok ? assets.beforeUpdate(existing, next, options) : allowed;
+    },
+    beforeDelete: async (existing, options) => {
+      const allowed = await split.beforeDelete(existing, options);
+      return allowed.ok ? assets.beforeDelete(existing, options) : allowed;
+    },
   };
 };
 
@@ -63,7 +80,7 @@ export function createAppServices(deps: {
   const assets = createAssetService({ store: createSqliteAssetStore(driver), clock, generateId });
   return {
     ledger: createLedgerService({
-      store: createSqliteLedgerStore(driver, splitChangeGuard, currencyUsage),
+      store: createSqliteLedgerStore(driver, transactionGuard, currencyUsage),
       clock,
       generateId,
     }),

@@ -1,4 +1,5 @@
 import { isValidDate } from '@/features/ledger/domain/exchange-rate';
+import type { TransactionKind } from '@/features/ledger/domain/journal';
 import type { Day } from '@/features/planning/domain/calendar';
 import { validateSchedule, type Schedule } from '@/features/planning/domain/schedule';
 import { err, ok, type Result } from '@/shared/result';
@@ -42,6 +43,8 @@ export type ExpectedStream = {
   readonly name: string;
   readonly kind: StreamKind;
   readonly amount: bigint;
+  /** Lets a budget recognize an expense, so its reservation does not count the money twice. */
+  readonly categoryId: string | null;
   readonly schedule: Schedule;
 };
 
@@ -51,6 +54,15 @@ export type TransactionLink = {
   readonly assetId: string;
   readonly streamId: string | null;
   readonly dueOn: Day | null;
+};
+
+/** A link to a stream with what its transaction says now, which an edit can change. */
+export type StreamPayment = TransactionLink & {
+  readonly kind: TransactionKind;
+  readonly day: Day;
+  /** Positive, in `currency`. */
+  readonly minor: bigint;
+  readonly currency: string;
 };
 
 /** What a message rule's entries link to. */

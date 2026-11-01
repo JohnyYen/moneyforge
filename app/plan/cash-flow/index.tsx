@@ -1,1 +1,1 @@
-export { CashFlowScreen as default } from '@/features/planning/ui/cash-flow-screen';
+export { CashFlowWithAssets as default } from '@/features/assets/ui/asset-ledger-screens';

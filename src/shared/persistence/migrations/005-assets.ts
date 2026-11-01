@@ -42,6 +42,7 @@ export const assetsMigration: Migration = {
       name TEXT NOT NULL,
       kind TEXT NOT NULL CHECK (kind IN ('income', 'expense')),
       amount TEXT NOT NULL CHECK (typeof(amount) = 'text'),
+      category_id TEXT REFERENCES categories (id),
       unit TEXT NOT NULL CHECK (unit IN ('day', 'week', 'month', 'year')),
       every INTEGER NOT NULL CHECK (every >= 1),
       day_of_month INTEGER,

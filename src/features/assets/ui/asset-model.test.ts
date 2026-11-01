@@ -1,12 +1,18 @@
+import type { Account } from '@/features/ledger/domain/account';
 import type { Currency } from '@/features/ledger/domain/currency';
+import type { RecurringItem } from '@/features/planning/domain/recurring';
+import { err, ok } from '@/shared/result';
 
 import type { Asset, ExpectedStream, Valuation } from '../domain/asset';
 import {
   assetRow,
+  droppedSelectionNotice,
   emptyStreamDraft,
+  linkAfterSave,
   linkInputFor,
   NO_SELECTION,
   percentLabel,
+  projectionNotices,
   rangeLabel,
   reportRange,
   toAssetDraft,
@@ -37,6 +43,7 @@ const stream: ExpectedStream = {
   name: 'Rent',
   kind: 'income',
   amount: 12_50n,
+  categoryId: null,
   schedule: { unit: 'month', every: 2, startOn: '2026-01-01', endOn: null, dayOfMonth: 15 },
 };
 
@@ -95,8 +102,10 @@ describe('drafts', () => {
       name: 'Rent',
       kind: 'income',
       amount: '12.50',
+      categoryId: null,
       schedule: stream.schedule,
     });
+    expect(toStreamInput(toStreamDraft({ ...stream, categoryId: 'food' }, usd)).categoryId).toBe('food');
   });
 
   it('starts a stream monthly from today', () => {
@@ -128,6 +137,124 @@ describe('linkInputFor', () => {
   it('links nothing for a transfer or with no choice', () => {
     expect(linkInputFor({ id: 't1', kind: 'transfer' }, selection)).toBeNull();
     expect(linkInputFor({ id: 't1', kind: 'income' }, NO_SELECTION)).toBeNull();
+  });
+});
+
+describe('droppedSelectionNotice', () => {
+  const selection = { assetId: 'a1', stream };
+
+  it('says so when a transfer cannot link', () => {
+    expect(droppedSelectionNotice({ kind: 'transfer' }, selection)).toMatch(/not linked/);
+  });
+
+  it('says so when the stream is of the other kind', () => {
+    expect(droppedSelectionNotice({ kind: 'expense' }, selection)).toMatch(/Rent is income/);
+  });
+
+  it('stays quiet when nothing was dropped', () => {
+    expect(droppedSelectionNotice({ kind: 'income' }, selection)).toBeNull();
+    expect(droppedSelectionNotice({ kind: 'transfer' }, NO_SELECTION)).toBeNull();
+  });
+});
+
+describe('linkAfterSave', () => {
+  const selection = { assetId: 'a1', stream };
+  const income = { id: 't1', kind: 'income' } as const;
+
+  it('links quietly', async () => {
+    const link = jest.fn(async () => ok(undefined));
+    await expect(linkAfterSave(income, selection, link)).resolves.toBeNull();
+    expect(link).toHaveBeenCalledWith({ transactionId: 't1', assetId: 'a1', streamId: 's1' });
+  });
+
+  it('turns a refused link into a notice instead of failing the saved entry', async () => {
+    const link = async () => err({ message: 'Asset not found.' });
+    await expect(linkAfterSave(income, selection, link)).resolves.toBe(
+      'Saved, not linked. Asset not found.',
+    );
+  });
+
+  it('turns a thrown failure into a notice too', async () => {
+    const link = async () => {
+      throw new Error('disk full');
+    };
+    await expect(linkAfterSave(income, selection, link)).resolves.toBe(
+      'Saved, not linked. Link it from the transaction.',
+    );
+  });
+
+  it('reports a dropped selection without calling for a link', async () => {
+    const link = jest.fn(async () => ok(undefined));
+    const notice = await linkAfterSave({ id: 't1', kind: 'transfer' }, selection, link);
+    expect(notice).toMatch(/not linked/);
+    expect(link).not.toHaveBeenCalled();
+  });
+});
+
+describe('projectionNotices', () => {
+  const bank: Account = {
+    id: 'bank',
+    name: 'Bank',
+    type: 'Bank',
+    currencyCode: 'USD',
+    openingBalance: 0n,
+    archived: false,
+    systemRole: null,
+  };
+  const item: RecurringItem = {
+    id: 'r1',
+    name: 'Tenant',
+    kind: 'income',
+    accountId: 'bank',
+    toAccountId: null,
+    amount: 12_50n,
+    currencyCode: 'USD',
+    categoryId: null,
+    schedule: { ...stream.schedule, dayOfMonth: null },
+    mode: 'ask',
+    applySplit: false,
+    active: true,
+    materializedThrough: null,
+  };
+  const notices = (change: Partial<Parameters<typeof projectionNotices>[0]>) =>
+    projectionNotices({
+      assets: [asset],
+      streams: [stream],
+      accounts: [bank],
+      items: [],
+      today: '2026-03-10',
+      ...change,
+    }).map(({ message }) => message);
+
+  it('names an archived linked account', () => {
+    const linked = { ...asset, accountId: 'bank' };
+    expect(notices({ assets: [linked], accounts: [{ ...bank, archived: true }] })).toEqual([
+      'Flat: Bank is archived, so the projection leaves out Rent.',
+    ]);
+  });
+
+  it('asks for a link when an account in the currency exists', () => {
+    expect(notices({})).toEqual(['Flat: link an account to see Rent in the projection.']);
+  });
+
+  it('says when no open account is in the currency of the asset', () => {
+    const expected = ['Flat: no account in USD, so the projection leaves out Rent.'];
+    expect(notices({ accounts: [] })).toEqual(expected);
+    expect(notices({ accounts: [{ ...bank, archived: true }] })).toEqual(expected);
+  });
+
+  it('warns about a recurring item that looks like the same money', () => {
+    const linked = { ...asset, accountId: 'bank' };
+    expect(notices({ assets: [linked], items: [item] })).toEqual([
+      'Flat: Rent looks like the recurring item Tenant on the same account. Both count in the projection.',
+    ]);
+  });
+
+  it('says nothing about a projected stream, a sold asset, or a stream that ended', () => {
+    expect(notices({ assets: [{ ...asset, accountId: 'bank' }] })).toEqual([]);
+    expect(notices({ assets: [{ ...asset, status: 'sold', soldOn: '2026-01-01' }] })).toEqual([]);
+    const ended = { ...stream, schedule: { ...stream.schedule, endOn: '2026-02-01' } };
+    expect(notices({ streams: [ended] })).toEqual([]);
   });
 });
 

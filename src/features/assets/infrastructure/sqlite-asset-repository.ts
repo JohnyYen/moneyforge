@@ -1,3 +1,5 @@
+import { toLocalDay } from '@/features/ledger/application/overview-use-cases';
+import type { TransactionKind } from '@/features/ledger/domain/journal';
 import type { ScheduleUnit } from '@/features/planning/domain/schedule';
 import type { SqlExecutor } from '@/shared/persistence/sql-driver';
 
@@ -9,6 +11,7 @@ import type {
   ExpectedStream,
   RuleLink,
   StreamKind,
+  StreamPayment,
   TransactionLink,
   Valuation,
 } from '../domain/asset';
@@ -34,6 +37,7 @@ type StreamRow = {
   name: string;
   kind: StreamKind;
   amount: string;
+  category_id: string | null;
   unit: ScheduleUnit;
   every: number;
   day_of_month: number | null;
@@ -46,6 +50,13 @@ type LinkRow = {
   asset_id: string;
   stream_id: string | null;
   due_on: string | null;
+};
+
+type PaymentRow = LinkRow & {
+  kind: TransactionKind;
+  occurred_at: string;
+  amount: string;
+  currency_code: string;
 };
 
 type RuleLinkRow = { rule_id: string; asset_id: string; stream_id: string | null };
@@ -80,6 +91,7 @@ const toStream = (row: StreamRow): ExpectedStream => ({
   name: row.name,
   kind: row.kind,
   amount: BigInt(row.amount),
+  categoryId: row.category_id,
   schedule: {
     unit: row.unit,
     every: row.every,
@@ -96,6 +108,17 @@ const toLink = (row: LinkRow): TransactionLink => ({
   streamId: row.stream_id,
   dueOn: row.stream_id ? row.due_on : null,
 });
+
+function toPayment(row: PaymentRow): StreamPayment {
+  const amount = BigInt(row.amount);
+  return {
+    ...toLink(row),
+    kind: row.kind,
+    day: toLocalDay(new Date(row.occurred_at)),
+    minor: amount < 0n ? -amount : amount,
+    currency: row.currency_code,
+  };
+}
 
 const toRuleLink = (row: RuleLinkRow): RuleLink => ({
   ruleId: row.rule_id,
@@ -175,10 +198,11 @@ export function createSqliteAssetRepository(sql: SqlExecutor): AssetRepository {
     saveStream: (stream) =>
       sql.run(
         `INSERT INTO asset_streams
-           (id, asset_id, name, kind, amount, unit, every, day_of_month, start_on, end_on)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (id, asset_id, name, kind, amount, category_id, unit, every, day_of_month, start_on, end_on)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            name = excluded.name, kind = excluded.kind, amount = excluded.amount,
+           category_id = excluded.category_id,
            unit = excluded.unit, every = excluded.every, day_of_month = excluded.day_of_month,
            start_on = excluded.start_on, end_on = excluded.end_on`,
         [
@@ -187,6 +211,7 @@ export function createSqliteAssetRepository(sql: SqlExecutor): AssetRepository {
           stream.name,
           stream.kind,
           stream.amount.toString(),
+          stream.categoryId,
           stream.schedule.unit,
           stream.schedule.every,
           stream.schedule.dayOfMonth,
@@ -199,6 +224,25 @@ export function createSqliteAssetRepository(sql: SqlExecutor): AssetRepository {
 
     listLinks: async () =>
       (await sql.all<LinkRow>('SELECT * FROM asset_transaction_links')).map(toLink),
+
+    listPayments: async () => {
+      const rows = await sql.all<PaymentRow>(
+        `SELECT l.*, t.kind, t.occurred_at, p.amount, p.currency_code
+         FROM asset_transaction_links l
+         JOIN transactions t ON t.id = l.transaction_id
+         JOIN postings p ON p.transaction_id = t.id
+         JOIN accounts a ON a.id = p.account_id AND a.system_role IS NULL
+         WHERE l.stream_id IS NOT NULL
+         ORDER BY t.occurred_at, t.id, p.position`,
+      );
+      // A transfer has two real sides, and one is enough to say it is no longer this stream's.
+      const seen = new Set<string>();
+      return rows.flatMap((row) => {
+        if (seen.has(row.transaction_id)) return [];
+        seen.add(row.transaction_id);
+        return [toPayment(row)];
+      });
+    },
 
     getLink: async (transactionId) => {
       const row = await sql.get<LinkRow>(

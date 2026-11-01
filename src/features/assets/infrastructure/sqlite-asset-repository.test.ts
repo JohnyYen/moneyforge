@@ -3,6 +3,8 @@ import { runMigrations } from '@/shared/persistence/migrator';
 import { createNodeSqliteDriver } from '@/shared/persistence/node-sqlite-driver';
 import type { SqlDriver } from '@/shared/persistence/sql-driver';
 
+import { createLedgerRepositories } from '@/features/ledger/infrastructure/sqlite-ledger-store';
+
 import type { Asset, ExpectedStream } from '../domain/asset';
 import { createSqliteAssetRepository } from './sqlite-asset-repository';
 
@@ -26,6 +28,7 @@ describe('sqlite asset repository', () => {
     name: 'Rent',
     kind: 'income',
     amount: 1000000000000000001n,
+    categoryId: null,
     schedule: { unit: 'month', every: 1, startOn: '2026-01-31', endOn: '2027-01-31', dayOfMonth: 15 },
   };
 
@@ -52,9 +55,54 @@ describe('sqlite asset repository', () => {
       soldOn: '2026-02-01',
     });
     await expect(assets.getStream('s1')).resolves.toEqual(stream);
+    await driver.run(
+      `INSERT INTO categories (id, name, kind, archived) VALUES ('food', 'Food', 'expense', 0)`,
+    );
+    await assets.saveStream({ ...stream, categoryId: 'food' });
+    await expect(assets.getStream('s1')).resolves.toMatchObject({ categoryId: 'food' });
     await expect(driver.get('SELECT typeof(amount) AS kind FROM asset_streams')).resolves.toEqual({
       kind: 'text',
     });
+  });
+
+  it('reads a payment from its transaction, on the real account', async () => {
+    const assets = createSqliteAssetRepository(driver);
+    const { journal } = createLedgerRepositories(driver);
+    await driver.run(
+      `INSERT INTO accounts (id, name, type, currency_code, opening_balance, archived)
+       VALUES ('bank', 'Bank', 'Bank', 'DAI', '0', 0),
+              ('system', 'Income', 'System', 'DAI', '0', 0)`,
+    );
+    await driver.run(`UPDATE accounts SET system_role = 'income' WHERE id = 'system'`);
+    await assets.saveAsset(asset);
+    await assets.saveStream(stream);
+    const occurredAt = new Date(2026, 2, 10, 12).toISOString();
+    await journal.save({
+      id: 't1',
+      occurredAt,
+      kind: 'income',
+      description: '',
+      categoryId: null,
+      metadata: null,
+      postings: [
+        { accountId: 'system', amount: -7n, currency: 'DAI' },
+        { accountId: 'bank', amount: 7n, currency: 'DAI' },
+      ],
+    });
+    await assets.saveLink({ transactionId: 't1', assetId: 'a1', streamId: 's1', dueOn: '2026-03-15' });
+
+    await expect(assets.listPayments()).resolves.toEqual([
+      {
+        transactionId: 't1',
+        assetId: 'a1',
+        streamId: 's1',
+        dueOn: '2026-03-15',
+        kind: 'income',
+        day: '2026-03-10',
+        minor: 7n,
+        currency: 'DAI',
+      },
+    ]);
   });
 
   it('refuses a sold asset with no date at the database too', async () => {

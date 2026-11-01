@@ -2,6 +2,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 
 import { toLocalDay } from '@/features/ledger/application/overview-use-cases';
+import type { Category } from '@/features/ledger/domain/category';
 import { useLedger } from '@/features/ledger/ui/ledger-context';
 import { ScheduleFields } from '@/features/planning/ui/schedule-fields';
 import { leaveScreen } from '@/shared/ui/leave-screen';
@@ -27,6 +28,8 @@ import {
 } from './asset-model';
 import { useAssets } from './assets-context';
 
+const NO_CATEGORY = 'none';
+
 const KIND_OPTIONS: readonly { value: StreamKind; label: string }[] = [
   { value: 'income', label: 'Income' },
   { value: 'expense', label: 'Expense' },
@@ -34,12 +37,14 @@ const KIND_OPTIONS: readonly { value: StreamKind; label: string }[] = [
 
 function StreamForm({
   initial,
+  categories,
   error,
   submitting,
   onSubmit,
   onRemove,
 }: {
   initial: StreamDraft;
+  categories: readonly Category[];
   error: string | null;
   submitting: boolean;
   onSubmit: (draft: StreamDraft) => void;
@@ -48,6 +53,12 @@ function StreamForm({
   const [draft, setDraft] = useState(initial);
   const update = (change: Partial<StreamDraft>) =>
     setDraft((current) => ({ ...current, ...change }));
+  const categoryOptions = [
+    { value: NO_CATEGORY, label: 'None' },
+    ...categories
+      .filter(({ kind }) => kind === draft.kind)
+      .map(({ id, name }) => ({ value: id, label: name })),
+  ];
 
   return (
     <Screen>
@@ -56,12 +67,18 @@ function StreamForm({
         label="Type"
         options={KIND_OPTIONS}
         value={draft.kind}
-        onChange={(kind) => update({ kind })}
+        onChange={(kind) => update({ kind, categoryId: '' })}
       />
       <AmountField
         label="Amount"
         value={draft.amount}
         onChangeText={(amount) => update({ amount })}
+      />
+      <ChoiceChips
+        label="Category (optional)"
+        options={categoryOptions}
+        value={draft.categoryId || NO_CATEGORY}
+        onChange={(value) => update({ categoryId: value === NO_CATEGORY ? '' : value })}
       />
       <ScheduleFields draft={draft} onChange={update} />
       <ErrorBanner message={error} />
@@ -79,12 +96,19 @@ export function StreamEditorScreen() {
   const ledger = useLedger();
   const router = useRouter();
   const load = useCallback(async () => {
-    const [asset, currencies, stream] = await Promise.all([
+    const [asset, currencies, stream, categories] = await Promise.all([
       assets.getAsset(id),
       ledger.listCurrencies(),
       streamId ? assets.getStream(streamId) : null,
+      ledger.listCategories(),
     ]);
-    return { stream, currency: currencies.find(({ code }) => code === asset?.currencyCode) };
+    return {
+      stream,
+      currency: currencies.find(({ code }) => code === asset?.currencyCode),
+      categories: categories.filter(
+        (category) => !category.archived || category.id === stream?.categoryId,
+      ),
+    };
   }, [assets, id, ledger, streamId]);
   const { state, reload } = useFocusQuery(load);
   const exit = () => leaveScreen(router);
@@ -102,7 +126,7 @@ export function StreamEditorScreen() {
 
   return (
     <QueryBoundary state={state} onRetry={reload}>
-      {({ stream, currency }) => {
+      {({ stream, currency, categories }) => {
         if (!currency || (streamId && !stream)) {
           return (
             <Screen>
@@ -115,6 +139,7 @@ export function StreamEditorScreen() {
             initial={
               stream ? toStreamDraft(stream, currency) : emptyStreamDraft(toLocalDay(new Date()))
             }
+            categories={categories}
             error={save.error ?? remove.error}
             submitting={save.submitting || remove.submitting}
             onSubmit={(draft) => void save.submit(draft)}

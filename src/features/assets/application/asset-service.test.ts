@@ -64,9 +64,12 @@ describe('assets', () => {
     name: 'Rent',
     kind: 'income',
     amount: '100',
+    categoryId: null,
     schedule: { unit: 'day', every: 1, startOn: TODAY, endOn: null, dayOfMonth: null },
     ...change,
   });
+
+  const monthlyFrom = (startOn: string) => ({ ...rent().schedule, unit: 'month' as const, startOn });
 
   const income = async (accountId: string, amount = '100', day = TODAY) =>
     unwrap(
@@ -342,6 +345,17 @@ describe('assets', () => {
       expect(projection.accounts[0].balances).toEqual([100_00n, 200_00n, 300_00n]);
     });
 
+    it('leaves a date open when what the rule posted falls short of it', async () => {
+      const bank = await account('Bank');
+      const flat = await asset({ accountId: bank });
+      const stream = unwrap(await services.assets.createStream(flat.id, rent({ amount: '150' })));
+      const { transaction } = await postedByRule(bank, flat.id, stream.id);
+
+      await expect(services.assets.getLink(transaction.id)).resolves.toMatchObject({ dueOn: TODAY });
+      const projection = unwrap(await services.planning.projectCashFlow(horizon));
+      expect(projection.accounts[0].balances[0]).toBe(250_00n);
+    });
+
     it('stops linking once the rule link is removed, and a removed rule drops it', async () => {
       const bank = await account('Bank');
       const flat = await asset();
@@ -461,6 +475,250 @@ describe('assets', () => {
       unwrap(await services.assets.removeStream(stream.id));
       await expect(services.assets.listStreams(flat.id)).resolves.toEqual([]);
       await expect(services.assets.getLink(paid.id)).resolves.toMatchObject({ assetId: flat.id, streamId: null });
+    });
+
+    it('saves every edited field of a stream', async () => {
+      const flat = await asset();
+      const stream = unwrap(await services.assets.createStream(flat.id, rent()));
+      const upkeep = unwrap(
+        await services.ledger.createCategory({ name: 'Upkeep', kind: 'expense', parentId: null }),
+      );
+      const schedule = {
+        unit: 'month' as const,
+        every: 2,
+        startOn: '2026-04-01',
+        endOn: '2026-12-01',
+        dayOfMonth: 5,
+      };
+      const input = rent({
+        name: 'Upkeep',
+        kind: 'expense',
+        amount: '7',
+        categoryId: upkeep.id,
+        schedule,
+      });
+      const expected = {
+        id: stream.id,
+        assetId: flat.id,
+        name: 'Upkeep',
+        kind: 'expense',
+        amount: 7_00n,
+        categoryId: upkeep.id,
+        schedule,
+      };
+
+      expect(unwrap(await services.assets.updateStream(stream.id, input))).toEqual(expected);
+      await expect(services.assets.getStream(stream.id)).resolves.toEqual(expected);
+    });
+
+    it('refuses a category of the other kind', async () => {
+      const flat = await asset();
+      const salary = unwrap(
+        await services.ledger.createCategory({ name: 'Pay', kind: 'income', parentId: null }),
+      );
+      const input = rent({ kind: 'expense', categoryId: salary.id });
+      await expect(services.assets.createStream(flat.id, input)).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'category-mismatch' },
+      });
+    });
+
+    it('nets a stream in a budgeted category against the reservation', async () => {
+      const bank = await account('Bank', 'USD', '1000');
+      const flat = await asset({ accountId: bank });
+      const food = unwrap(
+        await services.ledger.createCategory({ name: 'Upkeep', kind: 'expense', parentId: null }),
+      );
+      unwrap(
+        await services.planning.createBudget({
+          name: 'Upkeep',
+          currencyCode: 'USD',
+          amount: '100',
+          categoryIds: [food.id],
+          period: { kind: 'monthly', startDay: null },
+          rollover: false,
+        }),
+      );
+      const schedule = monthlyFrom('2026-03-12');
+      unwrap(
+        await services.assets.createStream(
+          flat.id,
+          rent({ kind: 'expense', amount: '40', categoryId: food.id, schedule }),
+        ),
+      );
+
+      const projection = unwrap(
+        await services.planning.projectCashFlow({ horizonDays: 21, includeBudgets: true }),
+      );
+      expect(projection.total.balances.at(-1)).toBe(900_00n);
+    });
+
+    it('moves a paid date with a schedule edit, so it is not projected again', async () => {
+      const bank = await account('Bank');
+      const flat = await asset({ accountId: bank });
+      const schedule = monthlyFrom('2026-03-10');
+      const stream = unwrap(await services.assets.createStream(flat.id, rent({ schedule })));
+      const paid = await income(bank);
+      const link = { assetId: flat.id, streamId: stream.id, transactionId: paid.id };
+      unwrap(await services.assets.linkTransaction(link));
+
+      const moved = rent({ schedule: monthlyFrom('2026-03-11') });
+      unwrap(await services.assets.updateStream(stream.id, moved));
+
+      expect((await services.assets.getLink(paid.id))?.dueOn).toBe('2026-03-11');
+      const projection = unwrap(await services.planning.projectCashFlow(horizon));
+      expect(projection.accounts[0].balances).toEqual([100_00n, 100_00n, 100_00n]);
+    });
+
+    it('needs the whole amount to cover a date, across payments', async () => {
+      const bank = await account('Bank');
+      const flat = await asset({ accountId: bank });
+      const schedule = monthlyFrom(TODAY);
+      const stream = unwrap(
+        await services.assets.createStream(flat.id, rent({ amount: '1000', schedule })),
+      );
+      const linked = async (amount: string) => {
+        const { id } = await income(bank, amount);
+        unwrap(
+          await services.assets.linkTransaction({ transactionId: id, assetId: flat.id, streamId: stream.id }),
+        );
+        return (await services.assets.getLink(id))?.dueOn;
+      };
+      const expectedToday = async () =>
+        unwrap(await services.planning.projectCashFlow(horizon)).accounts[0].balances[0];
+
+      await expect(linked('1')).resolves.toBe(TODAY);
+      await expect(expectedToday()).resolves.toBe(1001_00n);
+      await expect(linked('500')).resolves.toBe(TODAY);
+      await expect(expectedToday()).resolves.toBe(1501_00n);
+      await expect(linked('499')).resolves.toBe(TODAY);
+      await expect(expectedToday()).resolves.toBe(1000_00n);
+      await expect(linked('1000')).resolves.toBe('2026-04-10');
+    });
+
+    it('reads coverage from the transaction as it is now', async () => {
+      const bank = await account('Bank');
+      const flat = await asset({ accountId: bank });
+      const stream = unwrap(
+        await services.assets.createStream(flat.id, rent({ schedule: monthlyFrom(TODAY) })),
+      );
+      const paid = await income(bank);
+      const link = { assetId: flat.id, streamId: stream.id, transactionId: paid.id };
+      unwrap(await services.assets.linkTransaction(link));
+      const edit = (entry: object) =>
+        services.ledger.updateTransaction(paid.id, {
+          kind: 'income',
+          accountId: bank,
+          amount: '100',
+          occurredAt: localNoon(TODAY).toISOString(),
+          ...entry,
+        } as Parameters<typeof services.ledger.updateTransaction>[1]);
+      const today = async () =>
+        unwrap(await services.planning.projectCashFlow(horizon)).accounts[0].balances[0];
+
+      unwrap(await edit({ amount: '60' }));
+      await expect(today()).resolves.toBe(160_00n);
+
+      unwrap(await edit({ amount: '100' }));
+      await expect(today()).resolves.toBe(100_00n);
+
+      unwrap(await edit({ kind: 'expense' }));
+      await expect(services.assets.getLink(paid.id)).resolves.toMatchObject({ dueOn: null });
+      await expect(today()).resolves.toBe(0n);
+
+      unwrap(await edit({ kind: 'income', occurredAt: localNoon('2026-04-09').toISOString() }));
+      await expect(services.assets.getLink(paid.id)).resolves.toMatchObject({ dueOn: '2026-04-10' });
+      await expect(today()).resolves.toBe(200_00n);
+    });
+
+    it('moves no date for an edit the split refuses', async () => {
+      const bank = await account('Bank');
+      const savings = await account('Savings');
+      const flat = await asset({ accountId: bank });
+      const stream = unwrap(
+        await services.assets.createStream(flat.id, rent({ schedule: monthlyFrom(TODAY) })),
+      );
+      const paid = await income(bank);
+      const link = { assetId: flat.id, streamId: stream.id, transactionId: paid.id };
+      unwrap(await services.assets.linkTransaction(link));
+      const structure = unwrap(
+        await services.split.createStructure({
+          name: 'Salary',
+          lines: [
+            { label: 'Savings', targetAccountId: savings, percentage: null, isRemainder: true },
+          ],
+        }),
+      );
+      unwrap(
+        await services.split.applyStructure({ transactionId: paid.id, structureId: structure.id }),
+      );
+
+      const moved = await services.ledger.updateTransaction(paid.id, {
+        kind: 'expense',
+        accountId: bank,
+        amount: '100',
+        occurredAt: paid.occurredAt,
+      });
+
+      expect(moved).toMatchObject({ ok: false, error: { code: 'confirmation-required' } });
+      await expect(services.assets.getLink(paid.id)).resolves.toMatchObject({ dueOn: TODAY });
+    });
+
+    it('gives a date back when its payment goes', async () => {
+      const bank = await account('Bank');
+      const flat = await asset({ accountId: bank });
+      const stream = unwrap(
+        await services.assets.createStream(flat.id, rent({ schedule: monthlyFrom('2026-03-12') })),
+      );
+      const [first, second, third] = [await income(bank), await income(bank), await income(bank)];
+      for (const { id } of [first, second, third]) {
+        unwrap(
+          await services.assets.linkTransaction({ transactionId: id, assetId: flat.id, streamId: stream.id }),
+        );
+      }
+      const dueDates = async () =>
+        Promise.all(
+          [first, second, third].map(async ({ id }) => (await services.assets.getLink(id))?.dueOn),
+        );
+      await expect(dueDates()).resolves.toEqual(['2026-03-12', '2026-04-12', '2026-05-12']);
+
+      unwrap(await services.assets.unlinkTransaction(first.id));
+      await expect(dueDates()).resolves.toEqual([undefined, '2026-03-12', '2026-04-12']);
+
+      unwrap(await services.ledger.deleteTransaction(second.id));
+      await expect(dueDates()).resolves.toEqual([undefined, undefined, '2026-03-12']);
+
+      const other = unwrap(
+        await services.assets.createStream(flat.id, rent({ name: 'Other', schedule: monthlyFrom(TODAY) })),
+      );
+      const moved = await income(bank);
+      const link = { assetId: flat.id, streamId: stream.id, transactionId: moved.id };
+      unwrap(await services.assets.linkTransaction(link));
+      expect((await services.assets.getLink(moved.id))?.dueOn).toBe('2026-04-12');
+      unwrap(await services.assets.linkTransaction({ ...link, transactionId: third.id, streamId: other.id }));
+      expect((await services.assets.getLink(moved.id))?.dueOn).toBe('2026-03-12');
+    });
+
+    it('carries an unpaid past expense to today, so it can move the first negative day', async () => {
+      const bank = await account('Bank', 'USD', '50');
+      const flat = await asset({ accountId: bank });
+      const schedule = monthlyFrom('2026-03-01');
+      unwrap(
+        await services.assets.createStream(flat.id, rent({ kind: 'expense', schedule })),
+      );
+
+      const projection = unwrap(await services.planning.projectCashFlow(horizon));
+      expect(projection.accounts[0].balances).toEqual([-50_00n, -50_00n, -50_00n]);
+      expect(projection.total.firstNegativeOn).toBe(TODAY);
+    });
+
+    it('does not carry an unpaid past income', async () => {
+      const bank = await account('Bank');
+      const flat = await asset({ accountId: bank });
+      unwrap(await services.assets.createStream(flat.id, rent({ schedule: monthlyFrom('2026-03-01') })));
+
+      const projection = unwrap(await services.planning.projectCashFlow(horizon));
+      expect(projection.accounts[0].balances).toEqual([0n, 0n, 0n]);
     });
 
     it('refuses a stream on an unknown asset or with a bad amount', async () => {

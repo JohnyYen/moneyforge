@@ -5,6 +5,7 @@ import type {
   AssetType,
   ExpectedStream,
   RuleLink,
+  StreamPayment,
   TransactionLink,
   Valuation,
 } from '../domain/asset';
@@ -31,6 +32,8 @@ export interface AssetRepository {
   removeStream(id: string): Promise<void>;
 
   listLinks(): Promise<TransactionLink[]>;
+  /** Links to a stream, with what each transaction says now. */
+  listPayments(): Promise<StreamPayment[]>;
   getLink(transactionId: string): Promise<TransactionLink | null>;
   saveLink(link: TransactionLink): Promise<void>;
   removeLink(transactionId: string): Promise<void>;

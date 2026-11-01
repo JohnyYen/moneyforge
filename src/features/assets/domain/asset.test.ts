@@ -36,6 +36,7 @@ const stream = (change: Partial<ExpectedStream> = {}): ExpectedStream => ({
   assetId: 'a1',
   name: ' Rent ',
   kind: 'income',
+  categoryId: null,
   amount: 10_00n,
   schedule: { unit: 'month', every: 1, startOn: TODAY, endOn: null, dayOfMonth: null },
   ...change,

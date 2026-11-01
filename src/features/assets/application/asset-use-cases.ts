@@ -16,6 +16,7 @@ import {
   type Valuation,
 } from '../domain/asset';
 import { assetError, type AssetError } from '../domain/asset-error';
+import { refreshStream } from './link-use-cases';
 import type { AssetDeps, AssetRepositories } from './ports';
 
 export type AssetInput = {
@@ -32,6 +33,7 @@ export type StreamInput = {
   readonly name: string;
   readonly kind: StreamKind;
   readonly amount: string;
+  readonly categoryId: string | null;
   readonly schedule: Schedule;
 };
 
@@ -80,6 +82,12 @@ async function buildStream(
   if (!asset) return notFound('Asset');
   const amount = await amountIn(repositories, asset.currencyCode, input.amount);
   if (!amount.ok) return amount;
+  if (input.categoryId) {
+    const category = await repositories.categories.get(input.categoryId);
+    if (category?.kind !== input.kind) {
+      return err(assetError('category-mismatch', `Choose an ${input.kind} category.`));
+    }
+  }
   return validateStream({ ...input, ...base, amount: amount.value });
 }
 
@@ -187,12 +195,16 @@ export function createAssetUseCases({ store, clock, generateId }: AssetDeps) {
         return stream;
       }),
 
+    /** Dates can move, and an amount decides which are covered, so payments are placed again. */
     updateStream: (id: string, input: StreamInput): Promise<StreamResult> =>
       store.atomic(async (repositories) => {
         const existing = await repositories.assets.getStream(id);
         if (!existing) return notFound('Stream');
-        const stream = await buildStream(repositories, input, existing);
-        if (stream.ok) await repositories.assets.saveStream(stream.value);
+        const base = { id: existing.id, assetId: existing.assetId };
+        const stream = await buildStream(repositories, input, base);
+        if (!stream.ok) return stream;
+        await repositories.assets.saveStream(stream.value);
+        await refreshStream(repositories, stream.value);
         return stream;
       }),
 
