@@ -1,4 +1,4 @@
-import { convertMinor, formatRate, invertRate, isConsistentConversion, parseRate } from './rate';
+import { convertMinor, deriveRate, formatRate, invertRate, isConsistentConversion, parseRate } from './rate';
 
 function rate(text: string) {
   const result = parseRate(text);
@@ -77,5 +77,30 @@ describe('isConsistentConversion', () => {
 
     expect(isConsistentConversion(1000n, received, rate('0.918'), 2, 18)).toBe(true);
     expect(isConsistentConversion(1000n, received * 2n, rate('0.918'), 2, 18)).toBe(false);
+  });
+});
+
+describe('deriveRate', () => {
+  const check = (source: bigint, target: bigint, fromDecimals: number, toDecimals: number) => {
+    const text = deriveRate(source, target, fromDecimals, toDecimals);
+    const rate = parseRate(text);
+    if (!rate.ok) throw new Error(`${text} is not a rate`);
+    return { text, consistent: isConsistentConversion(source, target, rate.value, fromDecimals, toDecimals) };
+  };
+
+  it('states an exact rate plainly', () => {
+    expect(check(10000n, 9200n, 2, 2)).toEqual({ text: '0.92', consistent: true });
+  });
+
+  it('crosses decimals', () => {
+    expect(check(100n, 1000000n, 2, 6)).toEqual({ text: '1', consistent: true });
+  });
+
+  it('rounds a repeating quotient and stays consistent', () => {
+    expect(check(300n, 100n, 2, 2)).toEqual({ text: '0.333333333333', consistent: true });
+  });
+
+  it('keeps digits for a tiny rate', () => {
+    expect(check(BigInt(`1${'0'.repeat(30)}`), 1n, 18, 2).consistent).toBe(true);
   });
 });

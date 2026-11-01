@@ -1,8 +1,11 @@
+import type { Result } from '@/shared/result';
+
 import type { Account } from '../domain/account';
 import type { Category } from '../domain/category';
 import type { Currency } from '../domain/currency';
 import type { ExchangeRate } from '../domain/exchange-rate';
 import type { Transaction, TransactionKind } from '../domain/journal';
+import type { LedgerError } from '../domain/ledger-error';
 
 export type TransactionFilter = {
   readonly accountId?: string;
@@ -53,6 +56,29 @@ export interface SettingsRepository {
   set(key: string, value: string): Promise<void>;
 }
 
+export type TransactionChangeOptions = {
+  /** The user accepted the side effects a guard asked about with `confirmation-required`. */
+  readonly confirmed?: boolean;
+};
+
+/**
+ * Lets another feature that depends on a recorded transaction refuse a change to it, or
+ * adapt to it, in the same write. A refusal must happen before anything is written,
+ * because a returned error commits like any other result. Runs inside the transaction, so
+ * it must only await database work.
+ */
+export interface TransactionChangeGuard {
+  beforeUpdate(
+    existing: Transaction,
+    next: Transaction,
+    options: TransactionChangeOptions,
+  ): Promise<Result<void, LedgerError>>;
+  beforeDelete(
+    existing: Transaction,
+    options: TransactionChangeOptions,
+  ): Promise<Result<void, LedgerError>>;
+}
+
 export interface LedgerRepositories {
   readonly currencies: CurrencyRepository;
   readonly accounts: AccountRepository;
@@ -60,6 +86,7 @@ export interface LedgerRepositories {
   readonly journal: JournalRepository;
   readonly exchangeRates: ExchangeRateRepository;
   readonly settings: SettingsRepository;
+  readonly changeGuard: TransactionChangeGuard;
 }
 
 export interface LedgerStore extends LedgerRepositories {

@@ -17,7 +17,7 @@ import { ledgerError, type LedgerError } from '../domain/ledger-error';
 import { parseDecimal, type Money } from '../domain/money';
 import { convertMinor, isConsistentConversion, parseRate } from '../domain/rate';
 import type { LedgerDeps } from './ledger-deps';
-import type { LedgerRepositories } from './ports';
+import type { LedgerRepositories, TransactionChangeOptions } from './ports';
 
 type EntryFields = {
   readonly description?: string;
@@ -55,7 +55,7 @@ export type TransactionEntry =
   | ({ readonly kind: 'conversion' } & ConversionInput);
 
 /** What a new entry is built on. `existing` is the transaction an edit replaces. */
-type EntryBasis = {
+export type EntryBasis = {
   readonly id: string;
   readonly occurredAt: string;
   readonly existing: Transaction | null;
@@ -217,7 +217,7 @@ async function buildConversion(
   });
 }
 
-function buildEntry(
+export function buildEntry(
   repositories: LedgerRepositories,
   entry: TransactionEntry,
   basis: EntryBasis,
@@ -259,7 +259,11 @@ export function createTransactionUseCases({ store, clock, generateId }: LedgerDe
     getTransaction: (id: string) => store.journal.get(id),
 
     /** Builds through the factories again, then replaces the postings in one write. */
-    updateTransaction: (id: string, entry: TransactionEntry): Promise<TransactionResult> =>
+    updateTransaction: (
+      id: string,
+      entry: TransactionEntry,
+      options: TransactionChangeOptions = {},
+    ): Promise<TransactionResult> =>
       store.atomic(async (repositories) => {
         const existing = await repositories.journal.get(id);
         if (!existing) return transactionNotFound();
@@ -273,12 +277,22 @@ export function createTransactionUseCases({ store, clock, generateId }: LedgerDe
         }
         const basis = { id, occurredAt: existing.occurredAt, existing };
         const transaction = await buildEntry(repositories, entry, basis);
-        if (transaction.ok) await repositories.journal.save(transaction.value);
+        if (!transaction.ok) return transaction;
+        const allowed = await repositories.changeGuard.beforeUpdate(
+          existing,
+          transaction.value,
+          options,
+        );
+        if (!allowed.ok) return allowed;
+        await repositories.journal.save(transaction.value);
         return transaction;
       }),
 
-    deleteTransaction: (id: string): Promise<Result<void, LedgerError>> =>
-      store.atomic(async ({ journal }) => {
+    deleteTransaction: (
+      id: string,
+      options: TransactionChangeOptions = {},
+    ): Promise<Result<void, LedgerError>> =>
+      store.atomic(async ({ journal, changeGuard }) => {
         const existing = await journal.get(id);
         if (!existing) return transactionNotFound();
         if (!isDeletable(existing)) {
@@ -286,6 +300,8 @@ export function createTransactionUseCases({ store, clock, generateId }: LedgerDe
             ledgerError('transaction-locked', 'Change an opening balance by editing the account.'),
           );
         }
+        const allowed = await changeGuard.beforeDelete(existing, options);
+        if (!allowed.ok) return allowed;
         await journal.remove(id);
         return ok(undefined);
       }),

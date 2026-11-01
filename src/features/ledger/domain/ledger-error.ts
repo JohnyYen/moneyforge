@@ -17,6 +17,7 @@ export type LedgerErrorCode =
   | 'account-archived'
   | 'category-mismatch'
   | 'transaction-locked'
+  | 'confirmation-required'
   | 'not-found'
   | 'already-exists'
   | 'currency-in-use'

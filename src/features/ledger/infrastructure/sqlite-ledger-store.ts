@@ -1,6 +1,12 @@
 import type { SqlExecutor, SqlValue } from '@/shared/persistence/sql-driver';
+import { ok } from '@/shared/result';
 
-import type { LedgerRepositories, LedgerStore, TransactionFilter } from '../application/ports';
+import type {
+  LedgerRepositories,
+  LedgerStore,
+  TransactionChangeGuard,
+  TransactionFilter,
+} from '../application/ports';
 import type { Account, SystemRole } from '../domain/account';
 import type { Category, CategoryKind } from '../domain/category';
 import type { Currency } from '../domain/currency';
@@ -96,7 +102,18 @@ function buildListQuery(filter: TransactionFilter) {
   };
 }
 
-function createRepositories(sql: SqlExecutor): LedgerRepositories {
+/** Builds a guard bound to one connection or transaction. */
+export type ChangeGuardFactory = (sql: SqlExecutor) => TransactionChangeGuard;
+
+const allowEveryChange: ChangeGuardFactory = () => ({
+  beforeUpdate: async () => ok(undefined),
+  beforeDelete: async () => ok(undefined),
+});
+
+export function createLedgerRepositories(
+  sql: SqlExecutor,
+  changeGuard: ChangeGuardFactory = allowEveryChange,
+): LedgerRepositories {
   async function loadTransactions(rows: TransactionRow[]): Promise<Transaction[]> {
     if (rows.length === 0) return [];
     const byTransaction = new Map<string, PostingRow[]>();
@@ -300,12 +317,17 @@ function createRepositories(sql: SqlExecutor): LedgerRepositories {
           [key, value],
         ),
     },
+
+    changeGuard: changeGuard(sql),
   };
 }
 
-export function createSqliteLedgerStore(driver: SqlExecutor): LedgerStore {
+export function createSqliteLedgerStore(
+  driver: SqlExecutor,
+  changeGuard?: ChangeGuardFactory,
+): LedgerStore {
   return {
-    ...createRepositories(driver),
-    atomic: (work) => driver.transaction((tx) => work(createRepositories(tx))),
+    ...createLedgerRepositories(driver, changeGuard),
+    atomic: (work) => driver.transaction((tx) => work(createLedgerRepositories(tx, changeGuard))),
   };
 }

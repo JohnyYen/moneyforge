@@ -8,7 +8,7 @@ export type ExactRate = { readonly numerator: bigint; readonly denominator: bigi
 const RATE_PATTERN = /^(\d*)(?:\.(\d*))?$/;
 
 /** Built from text: Babel can compile `**` to `Math.pow`, which throws on bigint. */
-function powerOfTen(exponent: number): bigint {
+export function powerOfTen(exponent: number): bigint {
   return BigInt(`1${'0'.repeat(exponent)}`);
 }
 
@@ -65,6 +65,31 @@ export function isConsistentConversion(
       toDecimals,
     );
   return bound(-1n) <= target && target <= bound(1n);
+}
+
+const DERIVED_RATE_DIGIT_STEPS = [12, 24, 36, 48, 60];
+
+/**
+ * The rate two amounts imply, written as text. The quotient may repeat, so it is rounded,
+ * and that stays within what `isConsistentConversion` accepts for the digits written.
+ */
+export function deriveRate(
+  source: bigint,
+  target: bigint,
+  fromDecimals: number,
+  toDecimals: number,
+): string {
+  const numerator = target * powerOfTen(fromDecimals);
+  const denominator = source * powerOfTen(toDecimals);
+  for (const digits of DERIVED_RATE_DIGIT_STEPS) {
+    const rounded = divideRoundingHalfAwayFromZero(numerator * powerOfTen(digits), denominator);
+    if (rounded > 0n) {
+      const [whole, fraction = ''] = formatDecimal(rounded, digits).split('.');
+      const significant = fraction.replace(/0+$/, '');
+      return significant ? `${whole}.${significant}` : whole;
+    }
+  }
+  return '0';
 }
 
 function divideRoundingHalfAwayFromZero(numerator: bigint, denominator: bigint): bigint {
