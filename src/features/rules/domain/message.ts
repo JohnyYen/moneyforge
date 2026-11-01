@@ -96,7 +96,7 @@ const CURRENCY_AFTER = new RegExp(`^\\s*(?:${CURRENCY_NAMES})\\b`, 'i');
 const AMOUNT_WORD_BEFORE = /\b(?:of|de|por|amount|monto|valor|total)[\s:]*$/i;
 const COUNTED_THING_AFTER =
   /^\s*(?:sec|secs|seconds?|min|mins|minutes?|hours?|hrs?|days?|digits?|segundos?|minutos?|horas?|d[ií]as?|d[ií]gitos?)\b/i;
-const DO_NOT_SHARE =/\b(?:do not|don'?t|never) share\b|\bno (?:lo |la )?compart[ai]s?\b/i;
+const DO_NOT_SHARE = /\b(?:do not|don'?t|never) share\b|\bno (?:lo |la )?compart[ai]s?\b/i;
 
 /** A count alone proves nothing: a date or a second code would pass as the amount. */
 function hasMoneyAmount(text: string): boolean {
