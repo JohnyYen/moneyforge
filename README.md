@@ -40,6 +40,8 @@ pnpm lint
 | `play` (default) | MoneyForge      | `app.moneyforge`      |
 | `full`           | MoneyForge Full | `app.moneyforge.full` |
 
+Both variants accept text shared from other apps. Only `full` declares `RECEIVE_SMS` and the SMS receiver, through `plugins/with-message-capture.js`. The Play variant declares no SMS permission.
+
 ## Architecture
 
 Screaming and hexagonal: the folder tree names what the app does, and dependencies point inward.
@@ -101,6 +103,25 @@ Bank messages become transactions through rules you write. Everything starts wit
 - Dedup keys are HMAC-SHA256 under a secret generated on each install, so they reveal nothing and cannot be compared across devices. One source, kind, and reference is one message, so a replay creates nothing, while a reversal with the reference of its purchase is kept. With no reference, text seen before is never dropped and never posts by itself: it waits for review with a "possible repeat" note, called a likely copy within the duplicate window of 10 minutes.
 - A `transfer_out` and a `transfer_in` between the same two accounts become one movement: one transfer when the amounts match in one currency, and one conversion with both amounts when the currencies differ. A pair across currencies always waits for your approval, showing the implied rate. They can arrive in either order, from one source or two. A side with no pair waits and posts nothing, and it surfaces after the transfer window. If you post it alone, a side arriving later joins that transfer instead of adding another, unless its amount disagrees, which goes to review. Approving a lone side looks for an opposite side at any distance and asks whether they are the same transfer.
 - Posting builds the entry through the ledger's own validation, in one write with any split. `splitMode` `auto` applies the structure, and if it can no longer apply, the income stays recorded and the split is offered instead. `ask` offers it in the inbox. `none` does nothing.
+
+## Message capture
+
+`modules/message-capture` is a local Expo module in Kotlin. Nothing SMS-related lives in its own manifest, because that merges into both variants.
+
+Share target: sharing text into the app opens the paste screen prefilled, and you pick the source. The text stays in memory and goes through `ingestMessage` only when you submit it.
+
+Automatic capture is in the full variant only, off by default, and turned on under Messages and rules. The app asks for `RECEIVE_SMS`, never `READ_SMS` or `SEND_SMS`.
+
+- JavaScript copies the senders of enabled SMS sources and an on/off flag to SharedPreferences. The receiver normalizes senders exactly like `normalizeSender`; `modules/message-capture/fixtures/sender-vectors.json` holds the shared vectors.
+- The receiver only accepts the `BROADCAST_SMS`-protected system broadcast, joins multipart messages, and drops anything from a sender off the allowlist without writing or logging. It never logs a body or a sender.
+- Accepted messages go to an app-private queue file in `noBackupFilesDir`, written atomically and capped at 200 entries and 256 KB. A full queue refuses new messages and keeps what it holds. Bodies are cut at one character past the rule limit, so ingest still reports them as too long.
+- Kotlin never opens the database, because a second connection would escape the one write queue that dedup relies on. JavaScript drains the queue on app start and on foreground, through `ingestMessage`, removing each entry only after ingest resolves. A crash replays the entry into dedup. The file is deleted when the queue is empty.
+
+A one-time code from an allowlisted sender sits in app-private storage until the next drain, where the one-time code check discards it. A message that arrives while the app stays open waits for the next foreground. Android delivers nothing to an app that was force-stopped until it is opened again.
+
+Android restricts SMS permissions for apps installed outside a store. The settings screen explains how to allow restricted settings and links to App info.
+
+The Kotlin code has never been compiled here. See `odd/tasks/moneyforge-app.md` for what is proven.
 
 ## License
 

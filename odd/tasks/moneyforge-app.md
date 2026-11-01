@@ -55,7 +55,7 @@ Review base for the next candidate: `0f80acd`.
 - [x] T3.1 T3 hardening: conversion tolerance independent of how the rate is written, stall deadline from the first waiter, previews that reflect rejection, derived received amount preview, stale save error, metadata kept on edit, forms that cannot strand after saving, migration upgrade test. Commit: `d55be54`.
 - [x] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste input. Share input moved to T5. Commits: `599e7d8`, `ba5ea65`.
 - [x] T4.1 T4 hardening: verified review findings on one-time codes, number scanning, replays, lone transfer sides, reference keys, cross-currency pairs, field caps, purge, rule samples, keyed hashes, `secure_delete`, and `allowBackup`. Commits: `7b1a098`, `49a47f4`.
-- [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen, Android share target. Depends on an Android toolchain for build proof. Background capture must not open a second database connection: all access goes through the one queued `SqlDriver`, because a second connection would lose `PRAGMA foreign_keys` and `secure_delete` and escape the write queue that dedup relies on.
+- [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen, Android share target. Depends on an Android toolchain for build proof. Background capture must not open a second database connection: all access goes through the one queued `SqlDriver`, because a second connection would lose `PRAGMA foreign_keys` and `secure_delete` and escape the write queue that dedup relies on. Status: code complete; Kotlin never compiled; no Gradle build, no APK, no device run, user asked to install nothing yet.
 - [ ] T6 Planning: flexible budgets, recurring items, cash flow projection.
 - [ ] T7 Wealth: assets, asset cash flow, read-only on-chain balances.
 - [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy. Rule packs exclude samples. Backup must carry `rules.dedup_secret`, or every stored dedup key stops matching after a restore.
@@ -247,6 +247,37 @@ T4.1 review evidence:
 - Follow-up outside the review lifecycle: an authorization code is exempt only with a purchase word and a separate amount. RED: 3 failed of 47. GREEN: `pnpm test`, 35 suites, 683 tests passed; typecheck and lint exit 0.
 - Environment: mise `node@latest` points at an empty 26.5.0 install, so commands use 26.4.0 explicitly.
 
+T5 code complete, not closed. Route: delegated direct; 2+ non-trivial files.
+
+T5 evidence:
+
+- RED: `pnpm test`: 5 suites failed, 20 failed of 722, with the Kotlin sources and modules absent.
+- GREEN: `pnpm test`: 40 suites, 786 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `pnpm expo export --platform android`, offline: exit 0, one 3.2 MB Hermes bundle, fetched nothing.
+- `APP_VARIANT=play` and `APP_VARIANT=full` `pnpm expo config --type introspect`, offline, ran the plugin through Expo's own resolver on the real template manifest. Play: no SMS permission, no receiver, share filter present, `allowBackup` false. Full: only `RECEIVE_SMS`, the receiver with `BROADCAST_SMS`, share filter, `allowBackup` false.
+- `expo-modules-autolinking search --platform android` finds `message-capture` under `modules/` with no `package.json`.
+- Mutations, each failing tests: entry removed before ingest (2), no single-flight drain (1), `\uFEFF` and `\u00A0` removed from the Kotlin pattern (2), plugin adding SMS in both variants (3).
+- Kotlin was checked against `node_modules/expo-modules-core` and the Android API by reading only. `java` exists here but `kotlinc` does not. The Kotlin sender pattern itself runs in Jest over the shared vectors, extracted from `SenderNormalizer.kt`, with `toLowerCase` standing in for `lowercase()`.
+- Not run: Kotlin compile, Gradle build, APK, device run, or screen rendering test. The receiver, queue file, `AtomicFile` use, preferences, `OnNewIntent`, the `requestedPermissions` constant, `PermissionsAndroid`, `Linking.openSettings`, `CaptureHost`, the settings screen, and the paste screen's shared text are unproven at runtime. The `useRootNavigationState()?.key` wait in `CaptureHost` is the least certain piece: if it never fires, app start drains and shares stay stuck.
+- Decisions:
+  - `MAX_BODY_CHARS` is 2001, one past `MAX_MESSAGE_LENGTH`, so a long message still reaches ingest as too long instead of being cut into a valid one. A Jest test pins it to the JS limit.
+  - A full queue refuses the new message and keeps what it holds, 200 entries or 256 KB. Nothing counts refusals, so that loss is silent, though the SMS stays in the default SMS app.
+  - The queue is in `noBackupFilesDir`, not `filesDir`, because `allowBackup=false` does not cover device-to-device transfer on Android 12 and later. No extraction rules XML is needed. The sender allowlist in SharedPreferences is not excluded from that transfer.
+  - Availability is read from the installed package's `requestedPermissions`, so the constant cannot disagree with the manifest and needs no second flag.
+  - The plugin takes `variant` from `app.config.ts`, and also removes `RECEIVE_SMS` and the receiver in Play, so a stale full `android/` folder cannot leak them. Beyond the brief.
+  - The receiver has `android:permission="android.permission.BROADCAST_SMS"`, so no other app can forge a message into the queue. Beyond the brief.
+  - Permission and app info use React Native's `PermissionsAndroid` and `Linking.openSettings`, which keeps Kotlin smaller.
+  - `drain` is single-flight, because an overlapping run would ingest the same entry twice, and a message with no reference would then be held as a possible repeat. An entry whose ingest throws stays queued and later entries continue, so a message that always fails holds a slot until something changes.
+  - Turning capture off stops the receiver first, then drains, so what was accepted while on still reaches the inbox.
+  - The share text lives in memory in `createMessageCapture`, not in route params. The paste screen copies it into state and clears it on mount.
+  - `RuleDeps.onSourcesChanged` runs after a source is saved. A failed sync does not fail the save, and every foreground syncs again. A stale allowlist can only over-capture, and ingest still drops what the current sources refuse.
+  - A message that arrives with the app open waits for the next foreground, as specified. An open inbox does not refresh after a foreground drain until it regains focus.
+  - On a Play bundle, or any binary without the module, `requireOptionalNativeModule` returns null and `absentMessageCapture` makes everything inert. A deep link to `/rules/capture` redirects to `/rules`.
+- `.gitignore` has `android/`, which also matches `modules/message-capture/android`, so those sources were added with `git add -f`. They stay tracked, but a new file there is ignored until `.gitignore` gets `!modules/**/android/` and `!modules/**/android/**`.
+- Environment: text sent through this tool had `\uXXXX` escapes decoded into raw characters, so the Kotlin pattern and the fixture were rewritten from Python and checked to be ASCII.
+
 ## Next step
 
-T5 SMS capture, calling `rules.ingestMessage` over the one existing database connection, plus the Android share target. Run the ledger, split, and rules screens on a device or emulator when a toolchain exists, including migrations 002 and 003 over an existing database under `expo-sqlite`.
+T6 planning: flexible budgets, recurring items, cash flow projection. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, and rules screens there, including migrations 002 and 003 over an existing database under `expo-sqlite`.
