@@ -20,12 +20,13 @@ export type Budget = {
   readonly amount: bigint;
   readonly categoryIds: readonly string[];
   readonly period: BudgetPeriod;
-  /** Rollover starts with the period holding this day. */
+  /** Rollover starts with the period holding this day, which moves when the carry restarts. */
   readonly startsOn: Day;
   readonly rollover: boolean;
   readonly active: boolean;
 };
 
+/** A negative `minor` is a refund: income in one of the budget's categories. */
 export type Expense = {
   readonly day: Day;
   readonly minor: bigint;
@@ -56,7 +57,7 @@ export function validateBudget(budget: Budget): Result<Budget, PlanningError> {
   return ok({ ...budget, name });
 }
 
-function belongsTo(
+export function belongsTo(
   categoryId: string | null,
   chosen: ReadonlySet<string>,
   parents: ReadonlyMap<string, string | null>,
@@ -71,9 +72,23 @@ function belongsTo(
   return false;
 }
 
+const periodKey = (period: BudgetPeriod) => JSON.stringify(Object.entries(period).sort());
+
+/**
+ * True when what carried over no longer means what it did: past periods would be recomputed with
+ * terms they never ran under, so the carry starts again from zero instead.
+ */
+export function rolloverRestarts(before: Budget, after: Budget): boolean {
+  return (
+    before.amount !== after.amount ||
+    before.rollover !== after.rollover ||
+    periodKey(before.period) !== periodKey(after.period)
+  );
+}
+
 export function computeBudgetStatus(input: {
   readonly budget: Budget;
-  /** Spending only: transfers and other kinds never reach this. */
+  /** Spending and refunds only: transfers and other kinds never reach this. */
   readonly expenses: readonly Expense[];
   readonly rates: readonly ExchangeRate[];
   readonly currencies: readonly Currency[];

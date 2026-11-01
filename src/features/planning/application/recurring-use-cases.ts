@@ -10,6 +10,7 @@ import { err, ok, type Result } from '@/shared/result';
 import { addDays, laterDay, type Day } from '../domain/calendar';
 import { planningError, type PlanningError } from '../domain/planning-error';
 import {
+  MAX_ASK_DATES_PER_RUN,
   occurrenceFrom,
   validateRecurringFields,
   type Occurrence,
@@ -50,6 +51,8 @@ type ItemResult = Result<RecurringItem, PlanningError>;
 type OccurrenceResult = Result<Occurrence, PlanningError>;
 type WriteDeps = Pick<PlanningDeps, 'clock' | 'generateId'>;
 type Outcome = 'pending' | 'posted' | 'existing';
+
+const CAPPED_NOTE = `Only the latest ${MAX_ASK_DATES_PER_RUN} dates were added. Earlier dates were left out.`;
 
 const notFound = (what: string) => err(planningError('not-found', `${what} not found.`));
 const notPending = () =>
@@ -180,8 +183,12 @@ export function createRecurringUseCases({ store, clock, generateId }: PlanningDe
   let materializing: Promise<MaterializeSummary> | null = null;
 
   /** One date, in one write. The unique key behind `findOccurrence` makes this repeatable. */
-  async function materializeOne(item: RecurringItem, dueOn: Day): Promise<Outcome> {
-    const occurrence = occurrenceFrom(item, dueOn, generateId());
+  async function materializeOne(
+    item: RecurringItem,
+    dueOn: Day,
+    note: string | null,
+  ): Promise<Outcome> {
+    const occurrence = { ...occurrenceFrom(item, dueOn, generateId()), note };
     const holdWithNote = async (repositories: PlanningRepositories, reason: string) => {
       const note = `Could not post: ${reason}`;
       await repositories.planning.saveOccurrence({ ...occurrence, note });
@@ -211,8 +218,11 @@ export function createRecurringUseCases({ store, clock, generateId }: PlanningDe
   }
 
   /**
-   * Returns how many steps failed. Later dates wait for a failed one and the marker stays back, so
-   * nothing is lost, and the next run skips what already exists. Other items are not held up.
+   * Returns how many steps failed. Later dates wait for a failed one and the marker stays on the
+   * last date that exists, so nothing is lost and the projection never counts a date twice. Other
+   * items are not held up. An `ask` item keeps its latest dates when too many are due, and those
+   * before them are gone for good: an `auto` item only meets this after days away, so it is not
+   * capped, and `createItem` keeps it from a distant start.
    */
   async function materializeItem(
     item: RecurringItem,
@@ -221,10 +231,14 @@ export function createRecurringUseCases({ store, clock, generateId }: PlanningDe
   ): Promise<number> {
     const { materializedThrough, schedule } = item;
     const from = materializedThrough ? addDays(materializedThrough, 1) : schedule.startOn;
+    const dates = occurrencesBetween(schedule, from, today);
+    const kept = item.mode === 'ask' ? dates.slice(-MAX_ASK_DATES_PER_RUN) : dates;
     try {
-      for (const dueOn of occurrencesBetween(schedule, from, today)) {
-        const outcome = await materializeOne(item, dueOn);
+      for (const [index, dueOn] of kept.entries()) {
+        const capped = index === 0 && kept.length < dates.length;
+        const outcome = await materializeOne(item, dueOn, capped ? CAPPED_NOTE : null);
         if (outcome !== 'existing') created[outcome] += 1;
+        await store.planning.markMaterialized(item.id, dueOn);
       }
       await store.planning.markMaterialized(item.id, today);
       return 0;
@@ -247,6 +261,7 @@ export function createRecurringUseCases({ store, clock, generateId }: PlanningDe
     listItems: () => store.planning.listItems(),
     getItem: (id: string) => store.planning.getItem(id),
     listPendingOccurrences: () => store.planning.listPendingOccurrences(),
+    listPostedNotes: () => store.planning.listPostedNotes(),
     getOccurrence: (id: string) => store.planning.getOccurrence(id),
 
     /** For app start and after saving an item. Overlapping callers share one run. */
@@ -257,9 +272,13 @@ export function createRecurringUseCases({ store, clock, generateId }: PlanningDe
       return materializing;
     },
 
+    /** An `auto` item only posts from today on: past dates of a new item are never real entries. */
     createItem: (input: RecurringInput): Promise<ItemResult> =>
       store.atomic(async (repositories) => {
-        const base = { id: generateId(), active: true, materializedThrough: null };
+        const today = todayOf(clock);
+        const skipsPast = input.mode === 'auto' && input.schedule.startOn < today;
+        const materializedThrough = skipsPast ? addDays(today, -1) : null;
+        const base = { id: generateId(), active: true, materializedThrough };
         const item = await buildItem(repositories, input, base, null);
         if (item.ok) await repositories.planning.saveItem(item.value);
         return item;
@@ -270,25 +289,30 @@ export function createRecurringUseCases({ store, clock, generateId }: PlanningDe
       store.atomic(async (repositories) => {
         const existing = await repositories.planning.getItem(id);
         if (!existing) return notFound('Recurring item');
-        const { active, materializedThrough } = existing;
+        const { active, mode } = existing;
+        const yesterday = addDays(todayOf(clock), -1);
+        const materializedThrough =
+          mode === 'ask' && input.mode === 'auto'
+            ? laterDay(existing.materializedThrough ?? yesterday, yesterday)
+            : existing.materializedThrough;
         const base = { id, active, materializedThrough };
         const item = await buildItem(repositories, input, base, existing);
         if (item.ok) await repositories.planning.saveItem(item.value);
         return item;
       }),
 
-    /** Restoring moves the marker to today, so the time it was archived does not come back. */
+    /** Restoring moves the marker to yesterday, so only archived time stays gone, not today. */
     setItemActive: (id: string, active: boolean): Promise<Result<void, PlanningError>> =>
       store.atomic(async ({ planning }) => {
         const existing = await planning.getItem(id);
         if (!existing) return notFound('Recurring item');
-        const today = todayOf(clock);
+        const yesterday = addDays(todayOf(clock), -1);
         const { materializedThrough } = existing;
         await planning.saveItem({
           ...existing,
           active,
           materializedThrough: active
-            ? laterDay(materializedThrough ?? today, today)
+            ? laterDay(materializedThrough ?? yesterday, yesterday)
             : materializedThrough,
         });
         return ok(undefined);
@@ -308,6 +332,15 @@ export function createRecurringUseCases({ store, clock, generateId }: PlanningDe
         if (!occurrence) return notFound('Occurrence');
         if (occurrence.status !== 'pending') return notPending();
         await planning.saveOccurrence({ ...occurrence, status: 'skipped' });
+        return ok(undefined);
+      }),
+
+    /** Only a posted note: a pending one explains what still needs doing. */
+    dismissPostedNote: (id: string): Promise<Result<void, PlanningError>> =>
+      store.atomic(async ({ planning }) => {
+        const occurrence = await planning.getOccurrence(id);
+        if (occurrence?.status !== 'posted') return notFound('Note');
+        await planning.saveOccurrence({ ...occurrence, note: null });
         return ok(undefined);
       }),
   };

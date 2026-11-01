@@ -11,6 +11,9 @@ export type RecurringKind = (typeof RECURRING_KINDS)[number];
 export const RECURRING_MODES = ['ask', 'auto'] as const;
 export type RecurringMode = (typeof RECURRING_MODES)[number];
 
+/** The most dates an `ask` item adds in one run, so a distant start cannot flood the list. */
+export const MAX_ASK_DATES_PER_RUN = 60;
+
 export type RecurringItem = {
   readonly id: string;
   readonly name: string;
@@ -96,30 +99,43 @@ export function occurrenceFrom(item: RecurringItem, dueOn: Day, id: string): Occ
   };
 }
 
-export function flowsOfOccurrence(occurrence: Occurrence, day: Day): ExpectedFlow[] {
-  const { kind, accountId, toAccountId, amount, description: label } = occurrence;
-  if (kind === 'income') return [{ day, accountId, minor: amount, label }];
-  const out = { day, accountId, minor: -amount, label };
-  return kind === 'transfer' && toAccountId
-    ? [out, { day, accountId: toAccountId, minor: amount, label }]
-    : [out];
+/**
+ * A transfer with a side that is not projected has no flows at all: one side alone would read as
+ * money appearing or leaving, when it only moves.
+ */
+export function flowsOfOccurrence(
+  occurrence: Occurrence,
+  day: Day,
+  projected: ReadonlySet<string>,
+): ExpectedFlow[] {
+  const { kind, accountId, toAccountId, amount, categoryId, description: label } = occurrence;
+  if (kind === 'income') return [{ day, accountId, minor: amount, label, categoryId }];
+  const out = { day, accountId, minor: -amount, label, categoryId };
+  if (kind !== 'transfer' || !toAccountId) return [out];
+  if (!projected.has(accountId) || !projected.has(toAccountId)) return [];
+  return [out, { day, accountId: toAccountId, minor: amount, label, categoryId }];
 }
 
 /** What recurring items will do through `until`. Anything overdue counts as due today. */
 export function recurringFlows(
   items: readonly RecurringItem[],
   pending: readonly Occurrence[],
-  { today, until }: { readonly today: Day; readonly until: Day },
+  {
+    today,
+    until,
+    projected,
+  }: { readonly today: Day; readonly until: Day; readonly projected: ReadonlySet<string> },
 ): ExpectedFlow[] {
   const flows = pending.flatMap((occurrence) =>
-    flowsOfOccurrence(occurrence, laterDay(occurrence.dueOn, today)),
+    flowsOfOccurrence(occurrence, laterDay(occurrence.dueOn, today), projected),
   );
   for (const item of items) {
     if (!item.active) continue;
     const { materializedThrough, schedule } = item;
     const after = materializedThrough ? addDays(materializedThrough, 1) : schedule.startOn;
     for (const dueOn of occurrencesBetween(schedule, after, until)) {
-      flows.push(...flowsOfOccurrence(occurrenceFrom(item, dueOn, ''), laterDay(dueOn, today)));
+      const occurrence = occurrenceFrom(item, dueOn, '');
+      flows.push(...flowsOfOccurrence(occurrence, laterDay(dueOn, today), projected));
     }
   }
   return flows;

@@ -3,12 +3,13 @@ import { err, ok, type Result } from '@/shared/result';
 
 import {
   computeBudgetStatus,
+  rolloverRestarts,
   validateBudget,
   type Budget,
   type BudgetStatus,
   type Expense,
 } from '../domain/budget';
-import type { Day } from '../domain/calendar';
+import { laterDay, type Day } from '../domain/calendar';
 import { periodContaining, type BudgetPeriod } from '../domain/period';
 import { planningError, type PlanningError } from '../domain/planning-error';
 import type { PlanningDeps, PlanningRepositories } from './ports';
@@ -39,9 +40,8 @@ async function buildBudget(
   const budget = validateBudget({ ...input, ...base, amount: amount.value });
   if (!budget.ok) return budget;
   for (const id of budget.value.categoryIds) {
-    const category = await categories.get(id);
-    if (category?.kind !== 'expense') {
-      return err(planningError('category-mismatch', 'Choose expense categories.'));
+    if (!(await categories.get(id))) {
+      return err(planningError('category-mismatch', 'Choose a category that exists.'));
     }
   }
   return budget;
@@ -51,14 +51,25 @@ async function buildBudget(
 const startOf = ({ period }: BudgetInput, fallback: Day) =>
   period.kind === 'custom' ? period.startOn : fallback;
 
+/** A restarted carry cannot begin before a custom budget's own first day. */
+const restartOf = ({ period }: BudgetInput, today: Day) =>
+  period.kind === 'custom' ? laterDay(period.startOn, today) : today;
+
 export function createBudgetUseCases({ store, clock, generateId }: PlanningDeps) {
-  /** Fetches what the budget needing the longest history needs, once for all of them. */
-  async function expensesSince(from: Day): Promise<Expense[]> {
-    const recorded = await store.journal.list({ kind: 'expense', from: queryStartOf(from) });
-    return recorded.flatMap((transaction) => {
-      const amount = recordedAmount(transaction);
-      return amount ? [{ ...amount, categoryId: transaction.categoryId }] : [];
-    });
+  /**
+   * Fetches what the budget needing the longest history needs, once for all of them. Income counts
+   * as negative spending, and only a budget holding its category ever sees it: that is a refund.
+   */
+  async function spendingSince(from: Day): Promise<Expense[]> {
+    const spending = async (kind: 'expense' | 'income', sign: bigint): Promise<Expense[]> => {
+      const recorded = await store.journal.list({ kind, from: queryStartOf(from) });
+      return recorded.flatMap((transaction) => {
+        const amount = recordedAmount(transaction);
+        if (!amount) return [];
+        return [{ ...amount, minor: sign * amount.minor, categoryId: transaction.categoryId }];
+      });
+    };
+    return (await Promise.all([spending('expense', 1n), spending('income', -1n)])).flat();
   }
 
   async function budgetStatuses(): Promise<BudgetStatus[]> {
@@ -71,7 +82,7 @@ export function createBudgetUseCases({ store, clock, generateId }: PlanningDeps)
       )
       .reduce((first, second) => (first < second ? first : second));
     const [expenses, rates, currencies, categories] = await Promise.all([
-      expensesSince(earliest),
+      spendingSince(earliest),
       store.exchangeRates.list(),
       store.currencies.list(),
       store.categories.list(),
@@ -98,17 +109,19 @@ export function createBudgetUseCases({ store, clock, generateId }: PlanningDeps)
         return budget;
       }),
 
+    /** Changing what a carry was computed from restarts it. See `rolloverRestarts`. */
     updateBudget: (id: string, input: BudgetInput): Promise<BudgetResult> =>
       store.atomic(async (repositories) => {
         const existing = await repositories.planning.getBudget(id);
         if (!existing) return notFound();
-        const budget = await buildBudget(repositories, input, {
-          id,
-          startsOn: startOf(input, existing.startsOn),
-          active: existing.active,
-        });
-        if (budget.ok) await repositories.planning.saveBudget(budget.value);
-        return budget;
+        const { startsOn, active } = existing;
+        const built = await buildBudget(repositories, input, { id, startsOn, active });
+        if (!built.ok) return built;
+        const budget = rolloverRestarts(existing, built.value)
+          ? { ...built.value, startsOn: restartOf(input, todayOf(clock)) }
+          : built.value;
+        await repositories.planning.saveBudget(budget);
+        return ok(budget);
       }),
 
     setBudgetActive: (id: string, active: boolean): Promise<Result<void, PlanningError>> =>

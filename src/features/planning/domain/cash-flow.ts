@@ -1,7 +1,7 @@
 import type { Currency } from '@/features/ledger/domain/currency';
 
 import { addDays, daysBetween, type Day } from './calendar';
-import { convertOn, type ConversionContext } from './conversion';
+import { convertOn, converterOn, type ConversionContext } from './conversion';
 import type { PeriodRange } from './period';
 
 export type Movement = {
@@ -68,6 +68,8 @@ export type ExpectedFlow = {
   readonly accountId: string;
   readonly minor: bigint;
   readonly label: string;
+  /** Set when a budget can recognize this flow as spending in that category. */
+  readonly categoryId?: string | null;
 };
 
 export type ProjectedAccount = {
@@ -136,6 +138,10 @@ export function projectCashFlow(
     if (index !== null) outflows.set(index, (outflows.get(index) ?? 0n) + minor);
   }
 
+  const projectedCurrencies = new Set(accounts.map(({ currency }) => currency));
+  const converters = new Map(
+    [...projectedCurrencies].map((code) => [code, converterOn(code, base, today, context)]),
+  );
   const missing = new Set<string>();
   let reserved = 0n;
   const totals = days.map((_, index) => {
@@ -145,9 +151,10 @@ export function projectCashFlow(
     }
     let total = 0n;
     for (const [currency, minor] of perCurrency) {
-      const converted = minor === 0n ? 0n : convertOn(minor, currency, base, today, context);
-      if (converted === null) missing.add(currency);
-      else total += converted;
+      const convert = converters.get(currency);
+      if (minor === 0n) continue;
+      if (convert) total += convert(minor);
+      else missing.add(currency);
     }
     reserved += outflows.get(index) ?? 0n;
     return total - reserved;

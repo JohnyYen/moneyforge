@@ -4,7 +4,8 @@ import { isValidDate } from '@/features/ledger/domain/exchange-rate';
 import { parseDecimal } from '@/features/ledger/domain/money';
 import { err, ok, type Result } from '@/shared/result';
 
-import { addDays, earlierDay, type Day } from '../domain/calendar';
+import { reserveBudgets } from '../domain/budget-reservation';
+import { addDays, type Day } from '../domain/calendar';
 import {
   projectCashFlow,
   summarizeHistory,
@@ -12,7 +13,6 @@ import {
   type HistoryRow,
   type Movement,
 } from '../domain/cash-flow';
-import { convertOn } from '../domain/conversion';
 import { recentPeriods, type BudgetPeriod } from '../domain/period';
 import { planningError, type PlanningError } from '../domain/planning-error';
 import { flowOfPlanned, recurringFlows, type PlannedItem } from '../domain/recurring';
@@ -25,7 +25,10 @@ export type HistoryPeriod = (typeof HISTORY_PERIODS)[number];
 
 export type ProjectionOptions = {
   readonly horizonDays: number;
-  /** When set, what remains of each budget's current period leaves the total. */
+  /**
+   * When set, what remains of each budget's current period leaves the total, less what expected
+   * flows already take from it. See `reserveBudgets`.
+   */
   readonly includeBudgets: boolean;
 };
 
@@ -65,23 +68,6 @@ export function createCashFlowUseCases(
     return [...movements('income', incomes), ...movements('expense', expenses)];
   }
 
-  async function budgetOutflows(base: Currency, today: Day, until: Day) {
-    const [statuses, rates, currencies] = await Promise.all([
-      budgetStatuses(),
-      store.exchangeRates.list(),
-      store.currencies.list(),
-    ]);
-    const outflows: { day: Day; minor: bigint }[] = [];
-    const missing: string[] = [];
-    for (const { budget, period, remaining } of statuses) {
-      if (remaining <= 0n) continue;
-      const minor = convertOn(remaining, budget.currencyCode, base, today, { rates, currencies });
-      if (minor === null) missing.push(budget.currencyCode);
-      else outflows.push({ day: earlierDay(period.endOn, until), minor });
-    }
-    return { outflows, missing };
-  }
-
   return {
     async cashFlowHistory(
       period: HistoryPeriod,
@@ -112,39 +98,64 @@ export function createCashFlowUseCases(
       const today = todayOf(clock);
       const until = addDays(today, horizonDays);
 
-      const [accounts, balances, items, pending, planned, rates, currencies, external, budgets] =
-        await Promise.all([
-          store.accounts.listUser(),
-          store.journal.balances(),
-          store.planning.listItems(),
-          store.planning.listPendingOccurrences(),
-          store.planning.listPlannedItems(),
-          store.exchangeRates.list(),
-          store.currencies.list(),
-          Promise.all(expectedSources.map((source) => source.expectedFlows({ from: today, to: until }))),
-          includeBudgets
-            ? budgetOutflows(base.value, today, until)
-            : { outflows: [], missing: [] },
-        ]);
+      const [
+        accounts,
+        balances,
+        items,
+        pending,
+        planned,
+        rates,
+        currencies,
+        external,
+        statuses,
+        categories,
+      ] = await Promise.all([
+        store.accounts.listUser(),
+        store.journal.balances(),
+        store.planning.listItems(),
+        store.planning.listPendingOccurrences(),
+        store.planning.listPlannedItems(),
+        store.exchangeRates.list(),
+        store.currencies.list(),
+        Promise.all(expectedSources.map((source) => source.expectedFlows({ from: today, to: until }))),
+        includeBudgets ? budgetStatuses() : [],
+        store.categories.list(),
+      ]);
 
+      const projected = accounts.filter(({ archived }) => !archived);
+      const accountCurrencies = new Map(projected.map(({ id, currencyCode }) => [id, currencyCode]));
+      const flows = [
+        ...recurringFlows(items, pending, {
+          today,
+          until,
+          projected: new Set(accountCurrencies.keys()),
+        }),
+        ...planned.map(flowOfPlanned),
+        ...external.flat(),
+      ];
+      const budgets = reserveBudgets({
+        statuses,
+        flows,
+        accountCurrencies,
+        parents: new Map(categories.map(({ id, parentId }) => [id, parentId])),
+        base: base.value,
+        today,
+        until,
+        rates,
+        currencies,
+      });
       const projection = projectCashFlow({
         today,
         horizonDays,
         base: base.value,
         rates,
         currencies,
-        accounts: accounts
-          .filter(({ archived }) => !archived)
-          .map(({ id, currencyCode }) => ({
-            accountId: id,
-            currency: currencyCode,
-            balance: balances[id] ?? 0n,
-          })),
-        flows: [
-          ...recurringFlows(items, pending, { today, until }),
-          ...planned.map(flowOfPlanned),
-          ...external.flat(),
-        ],
+        accounts: projected.map(({ id, currencyCode }) => ({
+          accountId: id,
+          currency: currencyCode,
+          balance: balances[id] ?? 0n,
+        })),
+        flows,
         totalOutflows: budgets.outflows,
       });
       const missingRates = [...new Set([...projection.total.missingRates, ...budgets.missing])];

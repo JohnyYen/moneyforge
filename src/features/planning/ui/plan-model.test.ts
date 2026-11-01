@@ -13,6 +13,7 @@ import {
   missingRatesLabel,
   occurrenceRow,
   occurrencesLabel,
+  pastStartNotice,
   scheduleLabel,
   toBudgetDraft,
   toBudgetInput,
@@ -81,9 +82,34 @@ describe('budgetRow', () => {
     expect(row.subtitle).toContain('$20.00 over');
   });
 
+  it('leaves the bar empty when refunds outweigh spending', () => {
+    const row = budgetRow(status({ spent: -5_00n, remaining: 105_00n }), currencies);
+    expect(row.fraction).toBe(0);
+  });
+
   it('warns that a missing rate leaves spending out', () => {
     const row = budgetRow(status({ missingRates: ['COP', 'EUR'] }), currencies);
     expect(row.warning).toBe('No rate for COP, EUR, so spending in them is not counted.');
+  });
+});
+
+describe('pastStartNotice', () => {
+  const today = '2026-03-10';
+
+  it('says past dates of an automatic item are not posted', () => {
+    expect(pastStartNotice({ startOn: '2026-01-01', mode: 'auto' }, today)).toMatch(
+      /will not be posted/,
+    );
+  });
+
+  it('says past dates of an item that asks wait for confirmation, up to a limit', () => {
+    expect(pastStartNotice({ startOn: '2026-01-01', mode: 'ask' }, today)).toMatch(/latest 60/);
+  });
+
+  it('stays quiet from today on, and on text that is not yet a date', () => {
+    expect(pastStartNotice({ startOn: today, mode: 'auto' }, today)).toBeNull();
+    expect(pastStartNotice({ startOn: '2026-04-01', mode: 'ask' }, today)).toBeNull();
+    expect(pastStartNotice({ startOn: '20', mode: 'auto' }, today)).toBeNull();
   });
 });
 

@@ -20,12 +20,17 @@ export interface PlanningRepository {
   getOccurrence(id: string): Promise<Occurrence | null>;
   findOccurrence(itemId: string, dueOn: Day): Promise<Occurrence | null>;
   listPendingOccurrences(): Promise<Occurrence[]>;
+  /** Newest first, and bounded, so a note that repeats daily cannot flood the Plan tab. */
+  listPostedNotes(): Promise<Occurrence[]>;
   /** A second occurrence for one item and date fails on the database's unique key. */
   saveOccurrence(occurrence: Occurrence): Promise<void>;
 
   listPlannedItems(): Promise<PlannedItem[]>;
   savePlannedItem(item: PlannedItem): Promise<void>;
   removePlannedItem(id: string): Promise<void>;
+
+  /** True when a stored amount here is written in this currency's minor units. */
+  isCurrencyInUse(code: string): Promise<boolean>;
 }
 
 export interface PlanningRepositories extends SplitRepositories {

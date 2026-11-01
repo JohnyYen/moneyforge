@@ -146,6 +146,8 @@ const toPlanned = (row: PlannedRow): PlannedItem => ({
   description: row.description,
 });
 
+const MAX_POSTED_NOTES = 50;
+
 export function createSqlitePlanningRepository(sql: SqlExecutor): PlanningRepository {
   async function withCategories(rows: BudgetRow[]): Promise<Budget[]> {
     const links = await sql.all<{ budget_id: string; category_id: string }>(
@@ -284,6 +286,16 @@ export function createSqlitePlanningRepository(sql: SqlExecutor): PlanningReposi
         )
       ).map(toOccurrence),
 
+    listPostedNotes: async () =>
+      (
+        await sql.all<OccurrenceRow>(
+          `SELECT * FROM recurring_occurrences
+           WHERE status = 'posted' AND note IS NOT NULL
+           ORDER BY due_on DESC, id LIMIT ?`,
+          [MAX_POSTED_NOTES],
+        )
+      ).map(toOccurrence),
+
     saveOccurrence: (occurrence) =>
       sql.run(
         `INSERT INTO recurring_occurrences
@@ -325,5 +337,16 @@ export function createSqlitePlanningRepository(sql: SqlExecutor): PlanningReposi
       ),
 
     removePlannedItem: (id) => sql.run('DELETE FROM planned_items WHERE id = ?', [id]),
+
+    isCurrencyInUse: async (code) =>
+      (await sql.get(
+        `SELECT 1 FROM budgets WHERE currency_code = ?
+         UNION ALL SELECT 1 FROM recurring_items WHERE currency_code = ?
+         UNION ALL SELECT 1 FROM recurring_occurrences WHERE currency_code = ?
+         UNION ALL SELECT 1 FROM planned_items p
+           JOIN accounts a ON a.id = p.account_id WHERE a.currency_code = ?
+         LIMIT 1`,
+        [code, code, code, code],
+      )) !== undefined,
   };
 }

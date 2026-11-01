@@ -79,6 +79,15 @@ export interface TransactionChangeGuard {
   ): Promise<Result<void, LedgerError>>;
 }
 
+/**
+ * Lets another feature that stores amounts in a currency's minor units keep its decimals fixed,
+ * since changing them would rewrite what those amounts mean. Runs inside the transaction, so it
+ * must only await database work.
+ */
+export interface CurrencyUsageGuard {
+  isInUse(code: string): Promise<boolean>;
+}
+
 export interface LedgerRepositories {
   readonly currencies: CurrencyRepository;
   readonly accounts: AccountRepository;
@@ -87,6 +96,7 @@ export interface LedgerRepositories {
   readonly exchangeRates: ExchangeRateRepository;
   readonly settings: SettingsRepository;
   readonly changeGuard: TransactionChangeGuard;
+  readonly currencyUsage: CurrencyUsageGuard;
 }
 
 export interface LedgerStore extends LedgerRepositories {

@@ -170,6 +170,31 @@ describe('projectCashFlow', () => {
     expect(projection.total.firstNegativeOn).toBe('2026-03-12');
   });
 
+  it('resolves the rate of each currency once, however many days it projects', () => {
+    const lookups = jest.fn();
+    const counted = new Proxy(currencies, {
+      get(target, property, receiver) {
+        if (property === 'find') lookups();
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const projection = project({
+      horizonDays: 365,
+      accounts: [pesos, { ...pesos, accountId: 'd' }, checking],
+      currencies: counted,
+      rates: [rate('USD', 'COP', '4000')],
+    });
+
+    expect(projection.total.balances.at(-1)).toBe(102_00n);
+    expect(lookups).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report a currency with no rate while its total is zero', () => {
+    const projection = project({ accounts: [{ ...pesos, balance: 0n }] });
+    expect(projection.total.missingRates).toEqual([]);
+  });
+
   it('projects a whole year day by day', () => {
     const projection = project({ horizonDays: 365 });
     expect(projection.days).toHaveLength(366);

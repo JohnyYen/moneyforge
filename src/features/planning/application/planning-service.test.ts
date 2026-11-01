@@ -32,6 +32,22 @@ function failingOn(driver: SqlDriver, pattern: RegExp): SqlExecutor {
   return wrap(driver);
 }
 
+/** Lets `allowed` matching statements through, then fails the rest. */
+function failingAfter(driver: SqlDriver, pattern: RegExp, allowed: number): SqlExecutor {
+  let seen = 0;
+  const wrap = (sql: SqlExecutor): SqlExecutor => ({
+    exec: (text) => sql.exec(text),
+    all: (text, params) => sql.all(text, params),
+    get: (text, params) => sql.get(text, params),
+    run: async (text, params) => {
+      if (pattern.test(text) && (seen += 1) > allowed) throw new Error('disk failure');
+      await sql.run(text, params);
+    },
+    transaction: (work) => sql.transaction((tx) => work(wrap(tx))),
+  });
+  return wrap(driver);
+}
+
 describe('planning', () => {
   let driver: SqlDriver;
   let services: AppServices;
@@ -256,19 +272,90 @@ describe('planning', () => {
       const budget = unwrap(await services.planning.createBudget(budgetInput(food)));
       now = localNoon('2026-04-01');
       const updated = unwrap(
-        await services.planning.updateBudget(budget.id, budgetInput(fun, { amount: '200.50' })),
+        await services.planning.updateBudget(budget.id, budgetInput(fun, { name: 'Renamed' })),
       );
 
       expect(updated.startsOn).toBe(TODAY);
       expect(await services.planning.getBudget(budget.id)).toMatchObject({
-        amount: 200_50n,
+        name: 'Renamed',
         categoryIds: [fun],
       });
     });
 
+    it.each<[string, Partial<BudgetInput>]>([
+      ['amount', { amount: '200' }],
+      ['period', { period: { kind: 'monthly', startDay: 15 } }],
+      ['rollover', { rollover: false }],
+    ])('restarts what carried over when the %s changes', async (_, change) => {
+      const bank = await account('Bank', 'USD', '1000');
+      const food = await category('expense');
+      now = localNoon('2026-01-10');
+      const budget = unwrap(
+        await services.planning.createBudget(budgetInput(food, { rollover: true })),
+      );
+      await expense(bank, '30', '2026-01-20', food);
+      now = localNoon('2026-03-10');
+      expect((await statusOf(budget.id))?.carried).toBe(170_00n);
+
+      const updated = unwrap(
+        await services.planning.updateBudget(
+          budget.id,
+          budgetInput(food, { rollover: true, ...change }),
+        ),
+      );
+
+      expect(updated.startsOn).toBe('2026-03-10');
+      expect((await statusOf(budget.id))?.carried).toBe(0n);
+    });
+
+    it('keeps what carried over when a saved budget is unchanged', async () => {
+      const food = await category('expense');
+      now = localNoon('2026-01-10');
+      const input = budgetInput(food, {
+        rollover: true,
+        period: { kind: 'yearly', startMonth: 1, startDay: 1 },
+      });
+      const budget = unwrap(await services.planning.createBudget(input));
+      now = localNoon('2026-03-10');
+
+      const updated = unwrap(await services.planning.updateBudget(budget.id, input));
+
+      expect(updated.startsOn).toBe('2026-01-10');
+    });
+
+    it('keeps a custom budget from starting before its own first day', async () => {
+      const food = await category('expense');
+      const period = { kind: 'custom', startOn: '2026-05-01', lengthDays: 7 } as const;
+      const budget = unwrap(await services.planning.createBudget(budgetInput(food, { period })));
+
+      const updated = unwrap(
+        await services.planning.updateBudget(budget.id, budgetInput(food, { period, amount: '5' })),
+      );
+
+      expect(updated.startsOn).toBe('2026-05-01');
+    });
+
+    it('counts income in a budget category as negative spending', async () => {
+      const bank = await account('Bank', 'USD', '1000');
+      const food = await category('expense', 'Food');
+      const refunds = await category('income', 'Food refunds');
+      const salary = await category('income', 'Salary');
+      const budget = unwrap(
+        await services.planning.createBudget(budgetInput(food, { categoryIds: [food, refunds] })),
+      );
+      await expense(bank, '30', TODAY, food);
+      const income = async (categoryId: string, amount: string) =>
+        unwrap(await services.ledger.recordIncome({ accountId: bank, amount, categoryId }));
+      await income(refunds, '10');
+      await income(salary, '500');
+
+      const status = await statusOf(budget.id);
+      expect(status?.spent).toBe(20_00n);
+      expect(status?.remaining).toBe(80_00n);
+    });
+
     it('refuses a bad input and writes nothing', async () => {
       const food = await category('expense');
-      const income = await category('income');
       const planning = services.planning;
       const refused = [
         await planning.createBudget(budgetInput(food, { name: ' ' })),
@@ -276,7 +363,6 @@ describe('planning', () => {
         await planning.createBudget(budgetInput(food, { amount: 'abc' })),
         await planning.createBudget(budgetInput(food, { amount: '1.234' })),
         await planning.createBudget(budgetInput(food, { currencyCode: 'XXX' })),
-        await planning.createBudget(budgetInput(income)),
         await planning.createBudget(budgetInput('missing')),
         await planning.createBudget(budgetInput(food, { categoryIds: [] })),
       ];
@@ -391,7 +477,7 @@ describe('planning', () => {
 
     it('clamps a monthly item through the service, on the due date', async () => {
       const bank = await account('Bank', 'USD', '100');
-      now = localNoon('2026-04-30');
+      now = localNoon('2026-01-31');
       unwrap(
         await services.planning.createItem(
           recurringInput(bank, {
@@ -400,6 +486,7 @@ describe('planning', () => {
           }),
         ),
       );
+      now = localNoon('2026-04-30');
       await services.planning.materializeDue();
 
       const transactions = await services.ledger.listTransactions({ kind: 'expense' });
@@ -442,6 +529,7 @@ describe('planning', () => {
 
     it('dates a posted occurrence on its due day, not on today', async () => {
       const bank = await account('Bank', 'USD', '100');
+      now = localNoon('2026-03-02');
       unwrap(
         await services.planning.createItem(
           recurringInput(bank, {
@@ -450,6 +538,7 @@ describe('planning', () => {
           }),
         ),
       );
+      now = localNoon(TODAY);
       await services.planning.materializeDue();
 
       const [transaction] = await services.ledger.listTransactions({ kind: 'expense' });
@@ -606,11 +695,161 @@ describe('planning', () => {
 
       unwrap(await services.planning.setItemActive(item.id, true));
       await services.planning.materializeDue();
-      expect(await allRows('recurring_occurrences')).toHaveLength(1);
+      const rows = await allRows('recurring_occurrences');
+      expect(rows.map(({ due_on: dueOn }) => dueOn).sort()).toEqual([TODAY, '2026-03-20']);
+    });
 
-      now = localNoon('2026-03-21');
+    it('keeps today when an item is restored on a due date, and does not repeat it', async () => {
+      const bank = await account('Bank', 'USD', '100');
+      const item = unwrap(await services.planning.createItem(recurringInput(bank)));
       await services.planning.materializeDue();
-      expect(await allRows('recurring_occurrences')).toHaveLength(2);
+      unwrap(await services.planning.setItemActive(item.id, false));
+      unwrap(await services.planning.setItemActive(item.id, true));
+
+      await services.planning.materializeDue();
+
+      expect(await allRows('recurring_occurrences')).toHaveLength(1);
+      expect((await services.planning.getItem(item.id))?.materializedThrough).toBe(TODAY);
+    });
+
+    it('never posts the past dates of a new auto item', async () => {
+      const bank = await account('Bank', 'USD', '100');
+      const item = unwrap(
+        await services.planning.createItem(
+          recurringInput(bank, { mode: 'auto', schedule: daily({ startOn: '2016-03-10' }) }),
+        ),
+      );
+      expect(item.materializedThrough).toBe('2026-03-09');
+
+      expect(await services.planning.materializeDue()).toEqual({ pending: 0, posted: 1, failed: 0 });
+
+      expect(await allRows('recurring_occurrences')).toHaveLength(1);
+      expect(await balanceOf(bank)).toBe(90_00n);
+    });
+
+    it('leaves a new auto item starting today or later to run as usual', async () => {
+      const bank = await account('Bank', 'USD', '100');
+      const dates = [TODAY, '2026-04-01'];
+      for (const startOn of dates) {
+        const item = unwrap(
+          await services.planning.createItem(
+            recurringInput(bank, { mode: 'auto', schedule: daily({ startOn }) }),
+          ),
+        );
+        expect(item.materializedThrough).toBeNull();
+      }
+    });
+
+    it('catches up an existing auto item after days away', async () => {
+      const bank = await account('Bank', 'USD', '100');
+      unwrap(await services.planning.createItem(recurringInput(bank, { mode: 'auto' })));
+      await services.planning.materializeDue();
+      now = localNoon('2026-03-13');
+
+      expect((await services.planning.materializeDue()).posted).toBe(3);
+    });
+
+    it('does not post a backlog when an ask item becomes an auto item', async () => {
+      const bank = await account('Bank', 'USD', '100');
+      const schedule = daily({ startOn: '2026-01-01' });
+      const item = unwrap(
+        await services.planning.createItem(recurringInput(bank, { schedule })),
+      );
+
+      unwrap(
+        await services.planning.updateItem(item.id, recurringInput(bank, { schedule, mode: 'auto' })),
+      );
+
+      expect((await services.planning.materializeDue()).posted).toBe(1);
+      expect(await balanceOf(bank)).toBe(90_00n);
+    });
+
+    it('keeps only the latest 60 past dates of an ask item, and says so', async () => {
+      const bank = await account('Bank', 'USD', '100');
+      unwrap(
+        await services.planning.createItem(
+          recurringInput(bank, { schedule: daily({ startOn: '2016-03-10' }) }),
+        ),
+      );
+
+      await services.planning.materializeDue();
+      await services.planning.materializeDue();
+
+      const pending = await services.planning.listPendingOccurrences();
+      expect(pending).toHaveLength(60);
+      expect(pending[0].dueOn).toBe(addDays(TODAY, -59));
+      expect(pending.at(-1)?.dueOn).toBe(TODAY);
+      expect(pending[0].note).toMatch(/latest 60/);
+      expect(pending.slice(1).every(({ note }) => note === null)).toBe(true);
+    });
+
+    it('adds no notice when 60 dates or fewer are due', async () => {
+      const bank = await account('Bank', 'USD', '100');
+      unwrap(
+        await services.planning.createItem(
+          recurringInput(bank, { schedule: daily({ startOn: addDays(TODAY, -59) }) }),
+        ),
+      );
+
+      await services.planning.materializeDue();
+
+      const pending = await services.planning.listPendingOccurrences();
+      expect(pending).toHaveLength(60);
+      expect(pending.every(({ note }) => note === null)).toBe(true);
+    });
+
+    it('moves the marker after each date, so a stopped run counts none twice', async () => {
+      const bank = await account('Bank', 'USD', '100');
+      const item = unwrap(
+        await services.planning.createItem(
+          recurringInput(bank, { schedule: daily({ startOn: '2026-03-08' }) }),
+        ),
+      );
+      const failing = servicesOn(failingAfter(driver, /INSERT INTO recurring_occurrences/, 1));
+
+      expect((await failing.planning.materializeDue()).failed).toBe(1);
+
+      expect((await services.planning.getItem(item.id))?.materializedThrough).toBe('2026-03-08');
+      const projection = unwrap(
+        await services.planning.projectCashFlow({ horizonDays: 1, includeBudgets: false }),
+      );
+      expect(projection.accounts[0].balances).toEqual([70_00n, 60_00n]);
+    });
+
+    it('lists posted occurrences that have a note until they are dismissed', async () => {
+      const bank = await account('Bank', 'USD', '0');
+      unwrap(
+        await services.planning.createItem(
+          recurringInput(bank, { kind: 'income', amount: '100', mode: 'auto', applySplit: true }),
+        ),
+      );
+      unwrap(await services.planning.createItem(recurringInput(bank, { mode: 'auto' })));
+      await services.planning.materializeDue();
+
+      const notes = await services.planning.listPostedNotes();
+      expect(notes).toEqual([expect.objectContaining({ status: 'posted', dueOn: TODAY })]);
+      expect(notes[0].note).toMatch(/no default split/i);
+
+      unwrap(await services.planning.dismissPostedNote(notes[0].id));
+
+      expect(await services.planning.listPostedNotes()).toEqual([]);
+      expect(await allRows('recurring_occurrences')).toEqual(
+        expect.arrayContaining([expect.objectContaining({ status: 'posted', note: null })]),
+      );
+    });
+
+    it('dismisses only the note of a posted occurrence', async () => {
+      const bank = await account('Bank', 'USD', '100');
+      unwrap(await services.planning.createItem(recurringInput(bank, { mode: 'auto' })));
+      await archive(bank);
+      await services.planning.materializeDue();
+      const [pending] = await services.planning.listPendingOccurrences();
+
+      expect(await services.planning.dismissPostedNote(pending.id)).toMatchObject({ ok: false });
+      expect(await services.planning.dismissPostedNote('missing')).toMatchObject({ ok: false });
+
+      const [kept] = await services.planning.listPendingOccurrences();
+      expect(kept.note).toMatch(/could not post/i);
     });
 
     it('stops at the end date', async () => {
@@ -728,6 +967,58 @@ describe('planning', () => {
         await services.planning.materializeDue();
 
         expect(await services.split.countPendingMoves()).toBe(0);
+      });
+    });
+  });
+
+  describe('currency decimals', () => {
+    const euro = { code: 'EUR', name: 'Euro', decimals: 3, symbol: 'E', kind: 'fiat' as const };
+    const refused = { ok: false, error: { code: 'currency-in-use' } };
+
+    it('stay editable with nothing in the currency', async () => {
+      expect(await services.ledger.updateCurrency(euro)).toMatchObject({ ok: true });
+    });
+
+    it('are locked by a budget', async () => {
+      const food = await category('expense');
+      unwrap(await services.planning.createBudget(budgetInput(food, { currencyCode: 'EUR' })));
+      expect(await services.ledger.updateCurrency(euro)).toMatchObject(refused);
+    });
+
+    it('are locked by a recurring item', async () => {
+      unwrap(await services.planning.createItem(recurringInput(await account('E', 'EUR'))));
+      expect(await services.ledger.updateCurrency(euro)).toMatchObject(refused);
+    });
+
+    it('are locked by an occurrence that outlives its item currency', async () => {
+      const item = unwrap(
+        await services.planning.createItem(recurringInput(await account('E', 'EUR'))),
+      );
+      await services.planning.materializeDue();
+      unwrap(
+        await services.planning.updateItem(item.id, recurringInput(await account('Bank'))),
+      );
+      expect(await services.ledger.updateCurrency(euro)).toMatchObject(refused);
+    });
+
+    it('are locked by a planned item', async () => {
+      unwrap(
+        await services.planning.addPlannedItem({
+          plannedOn: TODAY,
+          kind: 'expense',
+          accountId: await account('E', 'EUR'),
+          amount: '5',
+          description: 'Trip',
+        }),
+      );
+      expect(await services.ledger.updateCurrency(euro)).toMatchObject(refused);
+    });
+
+    it('leave a rename free while the currency is in use', async () => {
+      const food = await category('expense');
+      unwrap(await services.planning.createBudget(budgetInput(food, { currencyCode: 'EUR' })));
+      expect(await services.ledger.updateCurrency({ ...euro, decimals: 2, name: 'Euros' })).toMatchObject({
+        ok: true,
       });
     });
   });
@@ -953,6 +1244,89 @@ describe('planning', () => {
       );
       expect(projection.total.missingRates).toEqual(['EUR']);
       expect(projection.total.balances.at(-1)).toBe(100_00n);
+    });
+
+    describe('budgets and expected flows', () => {
+      const month = { horizonDays: 30, includeBudgets: true };
+
+      const planRent = async (bank: string, categoryId: string, startOn = '2026-03-15') =>
+        unwrap(
+          await services.planning.createItem(
+            recurringInput(bank, {
+              amount: '40',
+              categoryId,
+              schedule: daily({ startOn, endOn: startOn }),
+            }),
+          ),
+        );
+
+      it('does not reserve what a recurring expense in the budget already takes', async () => {
+        const bank = await account('Bank', 'USD', '1000');
+        const food = await category('expense');
+        unwrap(await services.planning.createBudget(budgetInput(food)));
+        await planRent(bank, food);
+
+        const projection = unwrap(await services.planning.projectCashFlow(month));
+        expect(projection.total.balances.at(-1)).toBe(900_00n);
+      });
+
+      it('counts a pending occurrence in its budget', async () => {
+        const bank = await account('Bank', 'USD', '1000');
+        const food = await category('expense');
+        unwrap(await services.planning.createBudget(budgetInput(food)));
+        await planRent(bank, food, TODAY);
+        await services.planning.materializeDue();
+
+        const projection = unwrap(await services.planning.projectCashFlow(month));
+        expect(projection.total.balances.at(-1)).toBe(900_00n);
+      });
+
+      it('reserves a category once across overlapping budgets', async () => {
+        const bank = await account('Bank', 'USD', '1000');
+        const food = await category('expense');
+        unwrap(await services.planning.createBudget(budgetInput(food, { name: 'A' })));
+        unwrap(await services.planning.createBudget(budgetInput(food, { name: 'B' })));
+        await planRent(bank, food);
+
+        const projection = unwrap(await services.planning.projectCashFlow(month));
+        expect(projection.total.balances.at(-1)).toBe(900_00n);
+      });
+
+      it('reports a rate a budget left out of its spending', async () => {
+        const dollars = await account('Bank', 'USD', '100');
+        const euros = await account('Euros', 'EUR', '5');
+        const food = await category('expense');
+        unwrap(await services.planning.createBudget(budgetInput(food, { amount: '10' })));
+        await expense(euros, '5', TODAY, food);
+        await expense(dollars, '20', TODAY, food);
+
+        const projection = unwrap(await services.planning.projectCashFlow(month));
+        expect(projection.total.missingRates).toEqual(['EUR']);
+      });
+
+      it('reserves nothing for a budget that has not started', async () => {
+        await account('Bank', 'USD', '100');
+        const food = await category('expense');
+        const period = { kind: 'custom', startOn: '2026-03-20', lengthDays: 7 } as const;
+        unwrap(await services.planning.createBudget(budgetInput(food, { period })));
+
+        const projection = unwrap(await services.planning.projectCashFlow(month));
+        expect(projection.total.balances.at(-1)).toBe(100_00n);
+      });
+
+      it('drops a transfer whose other side is not projected', async () => {
+        const bank = await account('Bank', 'USD', '100');
+        const old = await account('Old');
+        unwrap(
+          await services.planning.createItem(
+            recurringInput(bank, { kind: 'transfer', toAccountId: old }),
+          ),
+        );
+        await archive(old);
+
+        const projection = unwrap(await services.planning.projectCashFlow(horizon));
+        expect(projection.total.balances).toEqual(Array(6).fill(100_00n));
+      });
     });
 
     it('leaves out archived accounts', async () => {

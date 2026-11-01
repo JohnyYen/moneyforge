@@ -13,6 +13,7 @@ import {
   EmptyState,
   ErrorBanner,
   Muted,
+  Notice,
   QueryBoundary,
   Screen,
   TextField,
@@ -24,6 +25,7 @@ import type { RecurringKind, RecurringMode } from '../domain/recurring';
 import type { ScheduleUnit } from '../domain/schedule';
 import {
   emptyRecurringDraft,
+  pastStartNotice,
   toRecurringDraft,
   toRecurringInput,
   type RecurringDraft,
@@ -87,6 +89,7 @@ function RecurringForm({
       .filter(({ kind }) => kind === draft.kind)
       .map(({ id, name }) => ({ value: id, label: name })),
   ];
+  const notice = onArchive ? null : pastStartNotice(draft, toLocalDay(new Date()));
 
   return (
     <Screen>
@@ -158,6 +161,7 @@ function RecurringForm({
         value={draft.mode}
         onChange={(mode) => update({ mode })}
       />
+      {notice ? <Notice>{notice}</Notice> : null}
       {draft.kind === 'income' ? (
         <>
           <ChoiceChips

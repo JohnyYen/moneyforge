@@ -7,7 +7,10 @@ import {
 } from '@/features/rules/application/message-capture';
 import type { ExpectedCashFlowSource } from '@/features/planning/application/ports';
 import { createPlanningService } from '@/features/planning/application/planning-service';
-import { createSqlitePlanningStore } from '@/features/planning/infrastructure/sqlite-planning-store';
+import {
+  createSqlitePlanningStore,
+  planningCurrencyUsage,
+} from '@/features/planning/infrastructure/sqlite-planning-store';
 import type { SecretGenerator } from '@/features/rules/application/ports';
 import { createSqliteLedgerStore } from '@/features/ledger/infrastructure/sqlite-ledger-store';
 import { createRulesService } from '@/features/rules/application/rules-service';
@@ -43,7 +46,7 @@ export function createAppServices(deps: {
   });
   return {
     ledger: createLedgerService({
-      store: createSqliteLedgerStore(driver, splitChangeGuard),
+      store: createSqliteLedgerStore(driver, splitChangeGuard, planningCurrencyUsage),
       clock,
       generateId,
     }),

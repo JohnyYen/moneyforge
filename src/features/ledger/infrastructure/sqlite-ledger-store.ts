@@ -2,6 +2,7 @@ import type { SqlExecutor, SqlValue } from '@/shared/persistence/sql-driver';
 import { ok } from '@/shared/result';
 
 import type {
+  CurrencyUsageGuard,
   LedgerRepositories,
   LedgerStore,
   TransactionChangeGuard,
@@ -110,9 +111,15 @@ const allowEveryChange: ChangeGuardFactory = () => ({
   beforeDelete: async () => ok(undefined),
 });
 
+/** Builds a usage guard bound to one connection or transaction. */
+export type CurrencyUsageFactory = (sql: SqlExecutor) => CurrencyUsageGuard;
+
+const noOtherUse: CurrencyUsageFactory = () => ({ isInUse: async () => false });
+
 export function createLedgerRepositories(
   sql: SqlExecutor,
   changeGuard: ChangeGuardFactory = allowEveryChange,
+  currencyUsage: CurrencyUsageFactory = noOtherUse,
 ): LedgerRepositories {
   async function loadTransactions(rows: TransactionRow[]): Promise<Transaction[]> {
     if (rows.length === 0) return [];
@@ -319,15 +326,19 @@ export function createLedgerRepositories(
     },
 
     changeGuard: changeGuard(sql),
+    currencyUsage: currencyUsage(sql),
   };
 }
 
 export function createSqliteLedgerStore(
   driver: SqlExecutor,
   changeGuard?: ChangeGuardFactory,
+  currencyUsage?: CurrencyUsageFactory,
 ): LedgerStore {
+  const repositories = (sql: SqlExecutor) =>
+    createLedgerRepositories(sql, changeGuard, currencyUsage);
   return {
-    ...createLedgerRepositories(driver, changeGuard),
-    atomic: (work) => driver.transaction((tx) => work(createLedgerRepositories(tx, changeGuard))),
+    ...repositories(driver),
+    atomic: (work) => driver.transaction((tx) => work(repositories(tx))),
   };
 }

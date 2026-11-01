@@ -27,15 +27,16 @@ export function createCurrencyUseCases({ store }: LedgerDeps) {
       const validated = validateCurrency(input);
       if (!validated.ok) return Promise.resolve(validated);
       const currency = validated.value;
-      return store.atomic(async ({ currencies, journal }) => {
+      return store.atomic(async ({ currencies, journal, currencyUsage }) => {
         const existing = await currencies.get(currency.code);
         if (!existing) return err(ledgerError('not-found', `Unknown currency ${currency.code}.`));
         if (
           existing.decimals !== currency.decimals &&
-          (await journal.currencyHasPostings(currency.code))
+          ((await journal.currencyHasPostings(currency.code)) ||
+            (await currencyUsage.isInUse(currency.code)))
         ) {
           return err(
-            ledgerError('currency-in-use', 'Decimals cannot change once the currency has entries.'),
+            ledgerError('currency-in-use', 'Decimals cannot change once the currency is in use.'),
           );
         }
         await currencies.save(currency);

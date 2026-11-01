@@ -88,12 +88,16 @@ function BudgetForm({
       />
       <ToggleChips
         label="Categories"
-        options={categories.map(({ id, name }) => ({ value: id, label: name }))}
+        options={categories.map(({ id, name, kind }) => ({
+          value: id,
+          label: kind === 'income' ? `${name} (refunds)` : name,
+        }))}
         values={draft.categoryIds}
         onToggle={(id) =>
           setDraft((current) => ({ ...current, categoryIds: toggled(current.categoryIds, id) }))
         }
       />
+      <Muted>Income in a category here counts as a refund, which lowers spending.</Muted>
       <ChoiceChips
         label="Period"
         options={PERIOD_KINDS.map((value) => ({ value, label: PERIOD_LABELS[value] }))}
@@ -138,6 +142,9 @@ function BudgetForm({
         onChange={(value) => update({ rollover: value === 'on' })}
       />
       <Muted>With rollover, what is left or overspent carries into the next period.</Muted>
+      {onArchive ? (
+        <Muted>Changing the amount, period, or rollover starts the carry again from zero.</Muted>
+      ) : null}
       <ErrorBanner message={error} />
       <Button label="Save" disabled={submitting} onPress={() => onSubmit(draft)} />
       {onArchive && archiveLabel ? (
@@ -170,8 +177,7 @@ export function BudgetEditorScreen() {
       base,
       currencies,
       categories: categories.filter(
-        ({ id: categoryId, kind, archived }) =>
-          kind === 'expense' && (!archived || chosen.has(categoryId)),
+        ({ id: categoryId, archived }) => !archived || chosen.has(categoryId),
       ),
     };
   }, [id, ledger, planning]);

@@ -1,7 +1,14 @@
 import type { Currency } from '@/features/ledger/domain/currency';
 import type { ExchangeRate } from '@/features/ledger/domain/exchange-rate';
 
-import { computeBudgetStatus, validateBudget, type Budget, type Expense } from './budget';
+import {
+  belongsTo,
+  computeBudgetStatus,
+  rolloverRestarts,
+  validateBudget,
+  type Budget,
+  type Expense,
+} from './budget';
 
 const usd: Currency = { code: 'USD', name: 'Dollar', decimals: 2, symbol: '$', kind: 'fiat' };
 const cop: Currency = { code: 'COP', name: 'Peso', decimals: 2, symbol: '$', kind: 'fiat' };
@@ -195,5 +202,33 @@ describe('validateBudget', () => {
     ['a bad period', { period: { kind: 'monthly', startDay: 40 } as const }],
   ])('refuses %s', (_, change) => {
     expect(validateBudget(budget(change)).ok).toBe(false);
+  });
+});
+
+describe('rolloverRestarts', () => {
+  it('stays false for a change that leaves the carry alone', () => {
+    expect(rolloverRestarts(budget(), budget({ name: 'Other', categoryIds: ['x'] }))).toBe(false);
+  });
+
+  it('sees the same period written in another key order as unchanged', () => {
+    const before = budget({ period: { kind: 'yearly', startMonth: 2, startDay: 1 } });
+    const after = budget({ period: { startDay: 1, startMonth: 2, kind: 'yearly' } });
+    expect(rolloverRestarts(before, after)).toBe(false);
+  });
+
+  it.each<[string, Partial<Budget>]>([
+    ['the amount', { amount: 1n }],
+    ['the period', { period: { kind: 'weekly', startDay: null } }],
+    ['the start of the period', { period: { kind: 'monthly', startDay: 5 } }],
+    ['rollover', { rollover: true }],
+  ])('restarts on %s', (_, change) => {
+    expect(rolloverRestarts(budget(), budget(change))).toBe(true);
+  });
+});
+
+describe('belongsTo', () => {
+  it('reaches a chosen parent', () => {
+    expect(belongsTo('c', new Set(['a']), new Map([['c', 'b'], ['b', 'a']]))).toBe(true);
+    expect(belongsTo('c', new Set(['z']), new Map([['c', 'b']]))).toBe(false);
   });
 });

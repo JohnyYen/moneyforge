@@ -1,4 +1,5 @@
 import type { Currency } from '@/features/ledger/domain/currency';
+import { isValidDate } from '@/features/ledger/domain/exchange-rate';
 import { formatDecimal, formatDisplay } from '@/features/ledger/domain/money';
 
 import type { BudgetInput } from '../application/budget-use-cases';
@@ -7,7 +8,13 @@ import type { Budget, BudgetStatus } from '../domain/budget';
 import { partsOf, type Day } from '../domain/calendar';
 import type { FlowTotals } from '../domain/cash-flow';
 import type { BudgetPeriod, PeriodKind } from '../domain/period';
-import type { Occurrence, RecurringItem, RecurringKind, RecurringMode } from '../domain/recurring';
+import {
+  MAX_ASK_DATES_PER_RUN,
+  type Occurrence,
+  type RecurringItem,
+  type RecurringKind,
+  type RecurringMode,
+} from '../domain/recurring';
 import type { Schedule, ScheduleUnit } from '../domain/schedule';
 
 type Currencies = ReadonlyMap<string, Currency>;
@@ -50,7 +57,7 @@ export function budgetRow(status: BudgetStatus, currencies: Currencies) {
     title: budget.name,
     subtitle: `${shortDay(period.startOn)} to ${shortDay(period.endOn)}. ${left}`,
     amount: `${money(spent, code, currencies)} of ${money(available, code, currencies)}`,
-    fraction: barFraction(spent, available),
+    fraction: barFraction(spent > 0n ? spent : 0n, available),
     overspent,
     warning:
       missingRates.length > 0
@@ -71,6 +78,18 @@ export function occurrenceRow(occurrence: Occurrence, currencies: Currencies) {
     subtitle: note ? `${dueOn}. ${note}` : dueOn,
     amount: money(kind === 'expense' ? -amount : amount, currencyCode, currencies),
   };
+}
+
+/** What a start date in the past does to a new item. */
+export function pastStartNotice(
+  { startOn, mode }: Pick<RecurringDraft, 'startOn' | 'mode'>,
+  today: Day,
+): string | null {
+  const day = startOn.trim();
+  if (!isValidDate(day) || day >= today) return null;
+  return mode === 'auto'
+    ? 'Dates before today will not be posted. Automatic posting starts today.'
+    : `Dates before today wait for you to confirm. Only the latest ${MAX_ASK_DATES_PER_RUN} are added.`;
 }
 
 const UNIT_NAMES: Record<ScheduleUnit, string> = {

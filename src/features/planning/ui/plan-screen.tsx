@@ -6,6 +6,7 @@ import { useLedger } from '@/features/ledger/ui/ledger-context';
 import {
   Button,
   EmptyState,
+  ErrorBanner,
   ListRow,
   Muted,
   Notice,
@@ -14,6 +15,7 @@ import {
   SectionLabel,
 } from '@/shared/ui/primitives';
 import { useFocusQuery } from '@/shared/ui/use-focus-query';
+import { useSubmit } from '@/shared/ui/use-submit';
 
 import { budgetRow, occurrenceRow, occurrencesLabel } from './plan-model';
 import { ProgressBar } from './plan-visuals';
@@ -26,18 +28,25 @@ export function PlanScreen() {
   const load = useCallback(async () => {
     // Covers an app left open across midnight. A failure runs again on the next visit.
     await planning.materializeDue().catch(() => undefined);
-    const [statuses, pending, currencies] = await Promise.all([
+    const [statuses, pending, notes, currencies] = await Promise.all([
       planning.budgetStatuses(),
       planning.listPendingOccurrences(),
+      planning.listPostedNotes(),
       ledger.listCurrencies(),
     ]);
-    return { statuses, pending, currencies: new Map(currencies.map((item) => [item.code, item])) };
+    return {
+      statuses,
+      pending,
+      notes,
+      currencies: new Map(currencies.map((item) => [item.code, item])),
+    };
   }, [ledger, planning]);
   const { state, reload } = useFocusQuery(load);
+  const dismiss = useSubmit((id: string) => planning.dismissPostedNote(id), reload);
 
   return (
     <QueryBoundary state={state} onRetry={reload}>
-      {({ statuses, pending, currencies }) => (
+      {({ statuses, pending, notes, currencies }) => (
         <Screen>
           <SectionLabel>Budgets</SectionLabel>
           {statuses.length === 0 ? (
@@ -76,6 +85,22 @@ export function PlanScreen() {
                   router.push({ pathname: '/plan/occurrences/[id]', params: { id: row.key } })
                 }
               />
+            );
+          })}
+          {notes.length > 0 ? <SectionLabel>Recorded, with a note</SectionLabel> : null}
+          <ErrorBanner message={dismiss.error} />
+          {notes.map((occurrence) => {
+            const row = occurrenceRow(occurrence, currencies);
+            return (
+              <View key={row.key}>
+                <ListRow title={row.title} subtitle={row.subtitle} trailing={row.amount} />
+                <Button
+                  label="Dismiss"
+                  variant="secondary"
+                  disabled={dismiss.submitting}
+                  onPress={() => void dismiss.submit(row.key)}
+                />
+              </View>
             );
           })}
           <ListRow title="Recurring items" onPress={() => router.push('/plan/recurring')} />

@@ -45,8 +45,16 @@ describe('occurrenceFrom', () => {
 });
 
 describe('flows', () => {
-  const flow = (kind: RecurringItem['kind'], toAccountId: string | null = null) =>
-    flowsOfOccurrence({ ...occurrenceFrom(item({ kind, toAccountId }), '2026-03-11', 'o1') }, '2026-03-11');
+  const flow = (
+    kind: RecurringItem['kind'],
+    toAccountId: string | null = null,
+    projected: ReadonlySet<string> = new Set(['a', 'b']),
+  ) =>
+    flowsOfOccurrence(
+      { ...occurrenceFrom(item({ kind, toAccountId }), '2026-03-11', 'o1') },
+      '2026-03-11',
+      projected,
+    );
 
   it('signs income and expense', () => {
     expect(flow('income').map(({ minor }) => minor)).toEqual([10_00n]);
@@ -59,10 +67,21 @@ describe('flows', () => {
       ['b', 10_00n],
     ]);
   });
+
+  it.each([
+    ['target', ['a']],
+    ['source', ['b']],
+  ])('drops a transfer whose %s is not projected', (_, ids) => {
+    expect(flow('transfer', 'b', new Set(ids))).toEqual([]);
+  });
+
+  it('carries the category, so a budget can recognize the flow', () => {
+    expect(flow('expense')).toEqual([expect.objectContaining({ categoryId: 'housing' })]);
+  });
 });
 
 describe('recurringFlows', () => {
-  const window = { today: '2026-03-10', until: '2026-03-13' };
+  const window = { today: '2026-03-10', until: '2026-03-13', projected: new Set(['a', 'b']) };
 
   it('starts after what is already materialized', () => {
     const flows = recurringFlows([item()], [], window);
