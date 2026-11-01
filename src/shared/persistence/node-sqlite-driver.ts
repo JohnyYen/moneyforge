@@ -1,9 +1,14 @@
 import { DatabaseSync } from 'node:sqlite';
 
-import { createSqlDriver, type SqlDriver, type SqlValue } from './sql-driver';
+import {
+  createSqlDriver,
+  type SqlDriver,
+  type SqlDriverOptions,
+  type SqlValue,
+} from './sql-driver';
 
 /** Test adapter: runs the production SQL and driver logic on `node:sqlite`. */
-export function createNodeSqliteDriver(path = ':memory:'): SqlDriver {
+export function createNodeSqliteDriver(path = ':memory:', options?: SqlDriverOptions): SqlDriver {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON');
 
@@ -23,5 +28,6 @@ export function createNodeSqliteDriver(path = ':memory:'): SqlDriver {
       },
     },
     async () => db.close(),
+    options,
   );
 }

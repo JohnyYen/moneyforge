@@ -1,4 +1,4 @@
-import { convertMinor, invertRate, parseRate } from './rate';
+import { convertMinor, formatRate, invertRate, isConsistentConversion, parseRate } from './rate';
 
 function rate(text: string) {
   const result = parseRate(text);
@@ -38,5 +38,44 @@ describe('convertMinor', () => {
     const inverse = invertRate(rate('4'));
 
     expect(convertMinor(100n, inverse, 0, 2)).toBe(2500n);
+  });
+});
+
+describe('formatRate', () => {
+  it('groups thousands and drops zeros that carry no value', () => {
+    expect(formatRate(rate('1500'))).toBe('1,500');
+    expect(formatRate(rate('1.500'))).toBe('1.5');
+    expect(formatRate(rate('0.000001'))).toBe('0.000001');
+  });
+});
+
+describe('isConsistentConversion', () => {
+  const consistent = (source: bigint, target: bigint, text: string) =>
+    isConsistentConversion(source, target, rate(text), 2, 2);
+
+  it('accepts the exact conversion', () => {
+    expect(consistent(1000n, 920n, '0.92')).toBe(true);
+  });
+
+  it('accepts any amount the rate could produce once rounded to its written digits', () => {
+    expect(consistent(1000n, 915n, '0.92')).toBe(true);
+    expect(consistent(1000n, 925n, '0.92')).toBe(true);
+  });
+
+  it('rejects an amount outside that range', () => {
+    expect(consistent(1000n, 914n, '0.92')).toBe(false);
+    expect(consistent(1000n, 926n, '0.92')).toBe(false);
+  });
+
+  it('tightens with the precision of the rate', () => {
+    expect(consistent(1000n, 918n, '0.9180')).toBe(true);
+    expect(consistent(1000n, 919n, '0.9180')).toBe(false);
+  });
+
+  it('compares across currencies of different precision', () => {
+    const received = 9180000000000000000n;
+
+    expect(isConsistentConversion(1000n, received, rate('0.918'), 2, 18)).toBe(true);
+    expect(isConsistentConversion(1000n, received * 2n, rate('0.918'), 2, 18)).toBe(false);
   });
 });

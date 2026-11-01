@@ -21,6 +21,7 @@ export function ReconcileScreen() {
   const { submit, error, submitting } = useSubmit(
     (countedBalance: string) => ledger.reconcile({ accountId: id, countedBalance }),
     () => router.back(),
+    { exitsOnSuccess: true },
   );
 
   return (

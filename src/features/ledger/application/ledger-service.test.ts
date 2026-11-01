@@ -351,7 +351,7 @@ describe('ledger service', () => {
           fromAccountId: dollars.id,
           toAccountId: euros.id,
           sourceAmount: '10',
-          targetAmount: '9.13',
+          targetAmount: '9.18',
           rate: '0.92',
           fee: '0.50',
           feeCurrency: 'USD',
@@ -359,8 +359,26 @@ describe('ledger service', () => {
       );
 
       await expect(balanceOf(dollars.id)).resolves.toBe(8950n);
-      await expect(balanceOf(euros.id)).resolves.toBe(913n);
+      await expect(balanceOf(euros.id)).resolves.toBe(918n);
       await expect(allPostingsBalance()).resolves.toBe(true);
+    });
+
+    it('rejects a received amount that contradicts the rate and records nothing', async () => {
+      const dollars = await account('Dollars', 'USD', '100');
+      const euros = await account('Euros', 'EUR');
+
+      await expect(
+        ledger.recordConversion({
+          fromAccountId: dollars.id,
+          toAccountId: euros.id,
+          sourceAmount: '10',
+          targetAmount: '91.80',
+          rate: '0.92',
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: 'inconsistent-conversion' } });
+
+      await expect(balanceOf(dollars.id)).resolves.toBe(10000n);
+      await expect(balanceOf(euros.id)).resolves.toBe(0n);
     });
 
     it('parses a conversion fee by the decimals of its own currency', async () => {

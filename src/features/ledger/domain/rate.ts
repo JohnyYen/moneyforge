@@ -1,6 +1,7 @@
 import { err, ok, type Result } from '@/shared/result';
 
 import { ledgerError, type LedgerError } from './ledger-error';
+import { formatDecimal, groupThousands } from './money';
 
 export type ExactRate = { readonly numerator: bigint; readonly denominator: bigint };
 
@@ -22,6 +23,14 @@ export function parseRate(text: string): Result<ExactRate, LedgerError> {
   return ok({ numerator, denominator: powerOfTen(fraction.length) });
 }
 
+/** For reading: an entered rate always has a power of ten as its denominator. */
+export function formatRate(rate: ExactRate): string {
+  const digits = rate.denominator.toString().length - 1;
+  const [whole, fraction = ''] = formatDecimal(rate.numerator, digits).split('.');
+  const significant = fraction.replace(/0+$/, '');
+  return `${groupThousands(whole)}${significant ? `.${significant}` : ''}`;
+}
+
 export function invertRate(rate: ExactRate): ExactRate {
   return { numerator: rate.denominator, denominator: rate.numerator };
 }
@@ -35,6 +44,27 @@ export function convertMinor(
   const numerator = minor * rate.numerator * powerOfTen(toDecimals);
   const denominator = rate.denominator * powerOfTen(fromDecimals);
   return divideRoundingHalfAwayFromZero(numerator, denominator);
+}
+
+/**
+ * True when `target` could result from `source` at a rate rounded to the digits it
+ * was written with, so a rate of 0.92 accepts anything from 0.915 to 0.925.
+ */
+export function isConsistentConversion(
+  source: bigint,
+  target: bigint,
+  rate: ExactRate,
+  fromDecimals: number,
+  toDecimals: number,
+): boolean {
+  const bound = (halfUnits: bigint) =>
+    convertMinor(
+      source,
+      { numerator: 2n * rate.numerator + halfUnits, denominator: 2n * rate.denominator },
+      fromDecimals,
+      toDecimals,
+    );
+  return bound(-1n) <= target && target <= bound(1n);
 }
 
 function divideRoundingHalfAwayFromZero(numerator: bigint, denominator: bigint): bigint {

@@ -13,7 +13,7 @@ import {
 } from '../domain/journal';
 import { ledgerError, type LedgerError } from '../domain/ledger-error';
 import { parseDecimal, type Money } from '../domain/money';
-import { convertMinor, parseRate } from '../domain/rate';
+import { convertMinor, isConsistentConversion, parseRate } from '../domain/rate';
 import type { LedgerDeps } from './ledger-deps';
 import type { LedgerRepositories } from './ports';
 
@@ -161,6 +161,24 @@ export function createTransactionUseCases({ store, clock, generateId }: LedgerDe
           ? parseDecimal(input.targetAmount, target.decimals)
           : ok(convertMinor(sourceAmount.value, rate.value, source.decimals, target.decimals));
         if (!targetAmount.ok) return targetAmount;
+        // Rejected rather than derived: a quotient of two amounts can be a repeating decimal,
+        // which an exact rate string cannot hold, and a typo in either field should surface.
+        if (
+          !isConsistentConversion(
+            sourceAmount.value,
+            targetAmount.value,
+            rate.value,
+            source.decimals,
+            target.decimals,
+          )
+        ) {
+          return err(
+            ledgerError(
+              'inconsistent-conversion',
+              'The amount received does not match the rate. Correct one, or leave it empty.',
+            ),
+          );
+        }
 
         let fee: Money | undefined;
         if (input.fee) {

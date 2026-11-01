@@ -13,6 +13,8 @@ import {
 
 import type { Account } from '../../domain/account';
 import type { Category } from '../../domain/category';
+import type { Currency } from '../../domain/currency';
+import { amountPreview, ratePreview } from '../amount-preview';
 
 export const ENTRY_KINDS = ['expense', 'income', 'transfer', 'conversion'] as const;
 export type EntryKind = (typeof ENTRY_KINDS)[number];
@@ -48,6 +50,7 @@ function accountOptions(accounts: readonly Account[]) {
 export function AddTransactionView({
   accounts,
   categories,
+  currencies,
   initialAccountId,
   today,
   error,
@@ -56,6 +59,7 @@ export function AddTransactionView({
 }: {
   accounts: readonly Account[];
   categories: readonly Category[];
+  currencies: readonly Currency[];
   initialAccountId: string | null;
   today: string;
   error: string | null;
@@ -98,6 +102,9 @@ export function AddTransactionView({
   const feeCurrencies = [source?.currencyCode, destination?.currencyCode].filter(
     (code): code is string => Boolean(code),
   );
+  const feeCurrencyCode = values.feeCurrency ?? feeCurrencies[0];
+  const currencyOf = (code: string | undefined) =>
+    currencies.find((currency) => currency.code === code);
 
   return (
     <Screen>
@@ -112,6 +119,7 @@ export function AddTransactionView({
         label={kind === 'conversion' ? 'You send' : 'Amount'}
         value={values.amount}
         onChangeText={(text) => set('amount', text)}
+        preview={amountPreview(values.amount, currencyOf(source?.currencyCode))}
         autoFocus
       />
       <ChoiceChips
@@ -142,20 +150,21 @@ export function AddTransactionView({
       ) : null}
       {kind === 'conversion' ? (
         <>
-          <TextField
+          <AmountField
             label={
               source && destination
                 ? `Rate, ${destination.currencyCode} per 1 ${source.currencyCode}`
                 : 'Rate'
             }
             value={values.rate}
-            onChangeText={(text) => set('rate', text.replace(/,/g, '.'))}
-            keyboardType="numeric"
+            onChangeText={(text) => set('rate', text)}
+            preview={ratePreview(values.rate, source?.currencyCode, destination?.currencyCode)}
           />
           <AmountField
             label="You receive (optional, calculated from the rate)"
             value={values.targetAmount}
             onChangeText={(text) => set('targetAmount', text)}
+            preview={amountPreview(values.targetAmount, currencyOf(destination?.currencyCode))}
           />
         </>
       ) : null}
@@ -164,13 +173,14 @@ export function AddTransactionView({
           label="Fee (optional)"
           value={values.fee}
           onChangeText={(text) => set('fee', text)}
+          preview={amountPreview(values.fee, currencyOf(feeCurrencyCode))}
         />
       ) : null}
       {kind === 'conversion' && values.fee && feeCurrencies.length === 2 ? (
         <ChoiceChips
           label="Fee currency"
           options={feeCurrencies.map((code) => ({ value: code, label: code }))}
-          value={values.feeCurrency ?? feeCurrencies[0]}
+          value={feeCurrencyCode}
           onChange={(code) => set('feeCurrency', code)}
         />
       ) : null}

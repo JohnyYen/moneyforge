@@ -1,28 +1,40 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import type { Result } from '@/shared/result';
 
+import { createSubmitGate } from './submit-gate';
 import { messageOf } from './use-focus-query';
 
-/** Runs a use case from a form, surfacing rule errors and storage failures the same way. */
+/**
+ * Runs a use case from a form, surfacing rule errors and storage failures the same way.
+ * Set `exitsOnSuccess` when `onSuccess` leaves the screen: the form stays live during
+ * the exit, and this keeps a late tap from submitting again.
+ */
 export function useSubmit<Input, Value>(
   action: (input: Input) => Promise<Result<Value, { readonly message: string }>>,
   onSuccess: (value: Value) => void,
+  { exitsOnSuccess = false }: { exitsOnSuccess?: boolean } = {},
 ) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // State updates land after the next render, too late to stop a second tap.
+  const gate = useRef(createSubmitGate(exitsOnSuccess));
 
   async function submit(input: Input) {
+    if (!gate.current.tryEnter()) return;
     setSubmitting(true);
     setError(null);
+    let succeeded = false;
     try {
       const result = await action(input);
+      succeeded = result.ok;
       if (result.ok) onSuccess(result.value);
       else setError(result.error.message);
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
-      setSubmitting(false);
+      gate.current.leave(succeeded);
+      setSubmitting(gate.current.isClosed());
     }
   }
 

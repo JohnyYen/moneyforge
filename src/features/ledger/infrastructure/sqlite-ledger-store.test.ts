@@ -1,7 +1,11 @@
 import { createNodeSqliteDriver } from '@/shared/persistence/node-sqlite-driver';
 import { runMigrations } from '@/shared/persistence/migrator';
 import { migrations } from '@/shared/persistence/migrations';
-import type { SqlDriver } from '@/shared/persistence/sql-driver';
+import {
+  ReentrantTransactionError,
+  type SqlDriver,
+  type SqlExecutor,
+} from '@/shared/persistence/sql-driver';
 
 import { buildSystemAccounts, type Account } from '../domain/account';
 import type { Currency } from '../domain/currency';
@@ -235,5 +239,39 @@ describe('SQLite ledger store', () => {
     await store.journal.save(income('t1', 'main', 100n));
 
     await expect(store.journal.currencyHasPostings('USD')).resolves.toBe(true);
+  });
+
+  it('loads a history larger than one query can bind, keeping every posting', async () => {
+    const count = 1201;
+    for (let index = 0; index < count; index += 1) {
+      await store.journal.save(income(`t${String(index).padStart(4, '0')}`, 'main', 1n));
+    }
+    let largestBinding = 0;
+    const counting: SqlExecutor = {
+      ...driver,
+      all: (sql, params) => {
+        largestBinding = Math.max(largestBinding, params?.length ?? 0);
+        return driver.all(sql, params);
+      },
+    };
+
+    const listed = await createSqliteLedgerStore(counting).journal.list({ accountId: 'main' });
+
+    expect(listed).toHaveLength(count);
+    expect(listed.every((item) => item.postings.length === 2)).toBe(true);
+    expect(listed[0].id).toBe('t1200');
+    expect(largestBinding).toBeLessThanOrEqual(500);
+  });
+
+  it('fails clearly when a top-level call is awaited inside atomic', async () => {
+    const stalling = createNodeSqliteDriver(':memory:', { stallTimeoutMs: 20 });
+    await runMigrations(stalling, migrations);
+    const reentrant = createSqliteLedgerStore(stalling);
+
+    await expect(reentrant.atomic(() => reentrant.currencies.list())).rejects.toBeInstanceOf(
+      ReentrantTransactionError,
+    );
+    await expect(reentrant.currencies.list()).resolves.toEqual([]);
+    await stalling.close();
   });
 });

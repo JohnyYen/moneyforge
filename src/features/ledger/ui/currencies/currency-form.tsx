@@ -7,7 +7,12 @@ import {
   TextField,
 } from '@/shared/ui/primitives';
 
-import { CURRENCY_KINDS, type Currency, type CurrencyKind } from '../../domain/currency';
+import {
+  CURRENCY_KINDS,
+  parseDecimalsText,
+  type Currency,
+  type CurrencyKind,
+} from '../../domain/currency';
 
 const KIND_OPTIONS = CURRENCY_KINDS.map((kind) => ({
   value: kind,
@@ -32,6 +37,13 @@ export function CurrencyForm({
   const [symbol, setSymbol] = useState(initial?.symbol ?? '');
   const [decimals, setDecimals] = useState(String(initial?.decimals ?? 2));
   const [kind, setKind] = useState<CurrencyKind>(initial?.kind ?? 'fiat');
+  const [decimalsError, setDecimalsError] = useState<string | null>(null);
+
+  const submit = () => {
+    const parsed = parseDecimalsText(decimals);
+    setDecimalsError(parsed.ok ? null : parsed.error.message);
+    if (parsed.ok) onSubmit({ code, name, symbol, kind, decimals: parsed.value });
+  };
 
   return (
     <>
@@ -52,12 +64,8 @@ export function CurrencyForm({
         keyboardType="number-pad"
       />
       <ChoiceChips label="Kind" options={KIND_OPTIONS} value={kind} onChange={setKind} />
-      <ErrorBanner message={error} />
-      <Button
-        label={submitLabel}
-        disabled={submitting}
-        onPress={() => onSubmit({ code, name, symbol, kind, decimals: Number(decimals) })}
-      />
+      <ErrorBanner message={decimalsError ?? error} />
+      <Button label={submitLabel} disabled={submitting} onPress={submit} />
     </>
   );
 }

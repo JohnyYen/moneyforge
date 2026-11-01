@@ -19,6 +19,7 @@ export function AddAccountScreen() {
   const { submit, error, submitting } = useSubmit(
     (values: AccountFormValues) => ledger.createAccount(values),
     () => router.back(),
+    { exitsOnSuccess: true },
   );
 
   return (

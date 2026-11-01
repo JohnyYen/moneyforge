@@ -19,6 +19,8 @@ export function AccountDetailView({
   currency,
   balance,
   rows,
+  canLoadMore,
+  onLoadMore,
   onAddTransaction,
   onReconcile,
   onEdit,
@@ -27,6 +29,8 @@ export function AccountDetailView({
   currency: Currency;
   balance: bigint;
   rows: readonly TransactionRowModel[];
+  canLoadMore: boolean;
+  onLoadMore: () => void;
   onAddTransaction: () => void;
   onReconcile: () => void;
   onEdit: () => void;
@@ -51,6 +55,7 @@ export function AccountDetailView({
       {rows.map((row) => (
         <TransactionRow key={row.id} row={row} />
       ))}
+      {canLoadMore ? <Button label="Load more" variant="secondary" onPress={onLoadMore} /> : null}
     </Screen>
   );
 }

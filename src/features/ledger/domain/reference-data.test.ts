@@ -1,6 +1,6 @@
 import { buildSystemAccounts, isSystemAccountId, validateAccountFields } from './account';
 import { findsCycle, validateCategoryFields } from './category';
-import { validateCurrency } from './currency';
+import { parseDecimalsText, validateCurrency } from './currency';
 import { isValidDate } from './exchange-rate';
 
 describe('validateCurrency', () => {
@@ -74,5 +74,19 @@ describe('isValidDate', () => {
     expect(isValidDate('2026-02-28')).toBe(true);
     expect(isValidDate('2026-02-30')).toBe(false);
     expect(isValidDate('2026-2-3')).toBe(false);
+  });
+});
+
+describe('parseDecimalsText', () => {
+  it('reads a whole number', () => {
+    expect(parseDecimalsText(' 18 ')).toEqual({ ok: true, value: 18 });
+    expect(parseDecimalsText('0')).toEqual({ ok: true, value: 0 });
+  });
+
+  it.each(['', '  ', '2.5', '1e1', '0x10', '-1', 'two', '19'])('rejects %p', (text) => {
+    expect(parseDecimalsText(text)).toMatchObject({
+      ok: false,
+      error: { code: 'invalid-currency' },
+    });
   });
 });

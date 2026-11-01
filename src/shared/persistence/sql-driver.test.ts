@@ -1,5 +1,12 @@
 import { createNodeSqliteDriver } from './node-sqlite-driver';
-import type { SqlDriver } from './sql-driver';
+import {
+  assertForeignKeysEnabled,
+  createSqlDriver,
+  ReentrantTransactionError,
+  TransactionRollbackError,
+  type SqlDriver,
+  type SqlStatements,
+} from './sql-driver';
 
 describe('SqlDriver', () => {
   let driver: SqlDriver;
@@ -85,5 +92,166 @@ describe('SqlDriver', () => {
     await driver.run('INSERT INTO items VALUES (?)', ['after']);
 
     await expect(names()).resolves.toEqual(['after']);
+  });
+});
+
+/** Records every statement; `fails` decides which ones throw. */
+function fakeConnection(fails: (sql: string) => Error | null = () => null) {
+  const statements: string[] = [];
+  const execute = async (sql: string) => {
+    statements.push(sql);
+    const failure = fails(sql);
+    if (failure) throw failure;
+  };
+  const connection: SqlStatements = {
+    exec: execute,
+    run: execute,
+    all: async (sql) => {
+      await execute(sql);
+      return [];
+    },
+    get: async (sql) => {
+      await execute(sql);
+      return undefined;
+    },
+  };
+  return { connection, statements };
+}
+
+describe('SqlDriver rollback failures', () => {
+  const failWork = () => Promise.reject(new Error('boom'));
+  const closeNothing = async () => undefined;
+
+  it('reports a distinct error carrying both causes', async () => {
+    const rollbackFailure = new Error('disk I/O error');
+    const { connection } = fakeConnection((sql) => (sql === 'ROLLBACK' ? rollbackFailure : null));
+    const driver = createSqlDriver(connection, closeNothing);
+
+    const failure = await driver.transaction(failWork).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(TransactionRollbackError);
+    expect(failure).toMatchObject({ workError: { message: 'boom' }, rollbackError: rollbackFailure });
+  });
+
+  it('retries the rollback before the next operation, which then runs', async () => {
+    let attempts = 0;
+    const { connection, statements } = fakeConnection((sql) => {
+      if (sql !== 'ROLLBACK') return null;
+      attempts += 1;
+      return attempts === 1 ? new Error('busy') : null;
+    });
+    const driver = createSqlDriver(connection, closeNothing);
+    await driver.transaction(failWork).catch(() => undefined);
+
+    await driver.run('INSERT next');
+    await driver.transaction(async () => 'again');
+
+    expect(statements).toEqual([
+      'BEGIN IMMEDIATE',
+      'ROLLBACK',
+      'ROLLBACK',
+      'INSERT next',
+      'BEGIN IMMEDIATE',
+      'COMMIT',
+    ]);
+  });
+
+  it('refuses to run anything while the transaction stays open, and can still close', async () => {
+    const { connection, statements } = fakeConnection((sql) =>
+      sql === 'ROLLBACK' ? new Error('busy') : null,
+    );
+    const closed = jest.fn(closeNothing);
+    const driver = createSqlDriver(connection, closed);
+    await driver.transaction(failWork).catch(() => undefined);
+
+    await expect(driver.run('INSERT next')).rejects.toBeInstanceOf(TransactionRollbackError);
+
+    expect(statements).not.toContain('INSERT next');
+    await driver.close();
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a transaction SQLite already rolled back as rolled back', async () => {
+    const { connection } = fakeConnection((sql) =>
+      sql === 'ROLLBACK' ? new Error('cannot rollback - no transaction is active') : null,
+    );
+    const driver = createSqlDriver(connection, closeNothing);
+
+    await expect(driver.transaction(failWork)).rejects.toThrow('boom');
+    await expect(driver.run('INSERT next')).resolves.toBeUndefined();
+  });
+});
+
+describe('SqlDriver re-entrancy', () => {
+  let driver: SqlDriver;
+
+  beforeEach(async () => {
+    driver = createNodeSqliteDriver(':memory:', { stallTimeoutMs: 20 });
+    await driver.exec('CREATE TABLE items (name TEXT NOT NULL)');
+  });
+
+  afterEach(() => driver.close());
+
+  it('rejects a top-level call awaited inside a transaction and rolls back', async () => {
+    await expect(
+      driver.transaction(async (tx) => {
+        await tx.run('INSERT INTO items VALUES (?)', ['a']);
+        await driver.all('SELECT name FROM items');
+      }),
+    ).rejects.toBeInstanceOf(ReentrantTransactionError);
+
+    await expect(driver.all('SELECT name FROM items')).resolves.toEqual([]);
+  });
+
+  it('rejects a nested top-level transaction', async () => {
+    await expect(
+      driver.transaction(() => driver.transaction(async () => 'inner')),
+    ).rejects.toBeInstanceOf(ReentrantTransactionError);
+  });
+
+  it('never runs a rejected statement later', async () => {
+    await driver.transaction(async () => {
+      await driver.run('INSERT INTO items VALUES (?)', ['rejected']).catch(() => undefined);
+    });
+
+    await expect(driver.all('SELECT name FROM items')).resolves.toEqual([]);
+  });
+
+  it('leaves a caller waiting on a transaction that is still executing statements', async () => {
+    const { connection } = fakeConnection();
+    const slow: SqlStatements = {
+      ...connection,
+      run: async (sql, params) => {
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        await connection.run(sql, params);
+      },
+    };
+    const busy = createSqlDriver(slow, async () => undefined, { stallTimeoutMs: 20 });
+
+    const transaction = busy.transaction(async (tx) => {
+      for (let step = 0; step < 6; step += 1) await tx.run('UPDATE step');
+      return 'done';
+    });
+    const waiting = busy.get('SELECT outside');
+
+    await expect(transaction).resolves.toBe('done');
+    await expect(waiting).resolves.toBeUndefined();
+  });
+});
+
+describe('assertForeignKeysEnabled', () => {
+  it('passes on a connection that enforces them', async () => {
+    const driver = createNodeSqliteDriver();
+
+    await expect(assertForeignKeysEnabled(driver)).resolves.toBeUndefined();
+    await driver.close();
+  });
+
+  it('fails when they read back as off', async () => {
+    const driver = createNodeSqliteDriver();
+    await driver.exec('PRAGMA foreign_keys = OFF');
+
+    await expect(assertForeignKeysEnabled(driver)).rejects.toThrow(/foreign keys/i);
+    await driver.close();
   });
 });

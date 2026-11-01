@@ -5,17 +5,15 @@ import { QueryBoundary } from '@/shared/ui/primitives';
 import { useFocusQuery } from '@/shared/ui/use-focus-query';
 
 import { useLedger } from '../ledger-context';
-import { toTransactionRow } from '../transaction-row-model';
+import { TRANSACTION_PAGE_SIZE, toTransactionRow } from '../transaction-row-model';
 import { ALL, TransactionsView, type KindFilter } from './transactions-view';
-
-const PAGE_SIZE = 50;
 
 export function TransactionsScreen() {
   const ledger = useLedger();
   const router = useRouter();
   const [kind, setKind] = useState<KindFilter>(ALL);
   const [accountId, setAccountId] = useState<string>(ALL);
-  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [limit, setLimit] = useState(TRANSACTION_PAGE_SIZE);
 
   const load = useCallback(async () => {
     const [transactions, accounts, categories, currencies] = await Promise.all([
@@ -48,7 +46,7 @@ export function TransactionsScreen() {
           canLoadMore={canLoadMore}
           onKindChange={setKind}
           onAccountChange={setAccountId}
-          onLoadMore={() => setLimit((value) => value + PAGE_SIZE)}
+          onLoadMore={() => setLimit((value) => value + TRANSACTION_PAGE_SIZE)}
           onAdd={() => router.push('/transactions/new')}
         />
       )}

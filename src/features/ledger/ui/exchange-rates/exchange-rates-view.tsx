@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import {
+  AmountField,
   Button,
   ChoiceChips,
   EmptyState,
@@ -14,6 +15,7 @@ import {
 
 import type { Currency } from '../../domain/currency';
 import type { ExchangeRate } from '../../domain/exchange-rate';
+import { ratePreview } from '../amount-preview';
 
 export type RateValues = { fromCode: string; toCode: string; rate: string; effectiveOn: string };
 
@@ -45,11 +47,11 @@ export function ExchangeRatesView({
       <Muted>Rates are entered by you. Each pair keeps one rate per day.</Muted>
       <ChoiceChips label="From" options={options} value={fromCode} onChange={setFromCode} />
       <ChoiceChips label="To" options={options} value={toCode} onChange={setToCode} />
-      <TextField
+      <AmountField
         label={fromCode && toCode ? `${toCode} per 1 ${fromCode}` : 'Rate'}
         value={rate}
-        onChangeText={(text) => setRate(text.replace(/,/g, '.'))}
-        keyboardType="numeric"
+        onChangeText={setRate}
+        preview={ratePreview(rate, fromCode, toCode)}
       />
       <TextField
         label="Date"

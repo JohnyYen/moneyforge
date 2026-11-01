@@ -10,6 +10,7 @@ import {
 } from '@/shared/ui/primitives';
 
 import type { Currency } from '../../domain/currency';
+import { amountPreview } from '../amount-preview';
 
 export type AccountFormValues = {
   name: string;
@@ -74,6 +75,10 @@ export function AccountForm({
         label="Opening balance"
         value={openingBalance}
         onChangeText={setOpeningBalance}
+        preview={amountPreview(
+          openingBalance,
+          currencies.find(({ code }) => code === currencyCode),
+        )}
         placeholder="0"
       />
       <ErrorBanner message={error} />

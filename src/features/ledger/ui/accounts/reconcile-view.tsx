@@ -11,6 +11,7 @@ import {
 
 import type { Currency } from '../../domain/currency';
 import { formatDisplay, parseDecimal } from '../../domain/money';
+import { amountPreview } from '../amount-preview';
 
 export function ReconcileView({
   accountName,
@@ -39,6 +40,7 @@ export function ReconcileView({
         label="Actual balance"
         value={counted}
         onChangeText={setCounted}
+        preview={amountPreview(counted, currency)}
         autoFocus
       />
       {difference !== null ? (

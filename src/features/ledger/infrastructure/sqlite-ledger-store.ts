@@ -66,6 +66,9 @@ const toCategory = (row: CategoryRow): Category => ({
   archived: row.archived === 1,
 });
 
+/** Below the 999 bound parameters some SQLite builds allow in one statement. */
+const POSTING_CHUNK_SIZE = 500;
+
 function buildListQuery(filter: TransactionFilter) {
   const conditions: string[] = [];
   const params: SqlValue[] = [];
@@ -96,17 +99,20 @@ function buildListQuery(filter: TransactionFilter) {
 function createRepositories(sql: SqlExecutor): LedgerRepositories {
   async function loadTransactions(rows: TransactionRow[]): Promise<Transaction[]> {
     if (rows.length === 0) return [];
-    const marks = rows.map(() => '?').join(', ');
-    const postings = await sql.all<PostingRow>(
-      `SELECT transaction_id, account_id, amount, currency_code FROM postings
-       WHERE transaction_id IN (${marks}) ORDER BY transaction_id, position`,
-      rows.map((row) => row.id),
-    );
     const byTransaction = new Map<string, PostingRow[]>();
-    for (const posting of postings) {
-      const group = byTransaction.get(posting.transaction_id);
-      if (group) group.push(posting);
-      else byTransaction.set(posting.transaction_id, [posting]);
+    for (let start = 0; start < rows.length; start += POSTING_CHUNK_SIZE) {
+      const ids = rows.slice(start, start + POSTING_CHUNK_SIZE).map((row) => row.id);
+      const marks = ids.map(() => '?').join(', ');
+      const postings = await sql.all<PostingRow>(
+        `SELECT transaction_id, account_id, amount, currency_code FROM postings
+         WHERE transaction_id IN (${marks}) ORDER BY transaction_id, position`,
+        ids,
+      );
+      for (const posting of postings) {
+        const group = byTransaction.get(posting.transaction_id);
+        if (group) group.push(posting);
+        else byTransaction.set(posting.transaction_id, [posting]);
+      }
     }
     return rows.map((row) => ({
       id: row.id,

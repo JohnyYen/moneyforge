@@ -5,6 +5,8 @@ import type { Currency } from '../domain/currency';
 import type { Posting, Transaction, TransactionKind } from '../domain/journal';
 import { formatDecimal, formatDisplay } from '../domain/money';
 
+export const TRANSACTION_PAGE_SIZE = 50;
+
 export type TransactionRowModel = {
   readonly id: string;
   readonly title: string;

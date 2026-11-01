@@ -18,8 +18,13 @@ export function AddTransactionScreen() {
   const ledger = useLedger();
   const router = useRouter();
   const load = useCallback(async () => {
-    const [accounts, categories] = await Promise.all([ledger.listAccounts(), ledger.listCategories()]);
+    const [accounts, categories, currencies] = await Promise.all([
+      ledger.listAccounts(),
+      ledger.listCategories(),
+      ledger.listCurrencies(),
+    ]);
     return {
+      currencies,
       accounts: accounts.filter((account) => !account.archived),
       categories: categories.filter((category) => !category.archived),
     };
@@ -58,14 +63,17 @@ export function AddTransactionScreen() {
       feeCurrency: values.feeCurrency ?? undefined,
     });
   };
-  const { submit, error, submitting } = useSubmit(record, () => router.back());
+  const { submit, error, submitting } = useSubmit(record, () => router.back(), {
+    exitsOnSuccess: true,
+  });
 
   return (
     <QueryBoundary state={state} onRetry={reload}>
-      {({ accounts, categories }) => (
+      {({ accounts, categories, currencies }) => (
         <AddTransactionView
           accounts={accounts}
           categories={categories}
+          currencies={currencies}
           initialAccountId={accountId ?? null}
           today={today}
           error={error}

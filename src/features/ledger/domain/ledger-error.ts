@@ -3,6 +3,7 @@ export type LedgerErrorCode =
   | 'too-precise'
   | 'invalid-decimals'
   | 'invalid-rate'
+  | 'inconsistent-conversion'
   | 'invalid-date'
   | 'invalid-currency'
   | 'invalid-account'

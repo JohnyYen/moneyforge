@@ -22,11 +22,16 @@ export function parseDecimal(text: string, decimals: number): Result<bigint, Led
   if (!match || (whole === '' && fraction === '')) {
     return err(ledgerError('invalid-amount', 'Enter a valid amount.'));
   }
-  const kept = fraction.slice(0, decimals);
-  if (/[^0]/.test(fraction.slice(decimals))) {
-    return err(ledgerError('too-precise', `This currency allows ${decimals} decimals.`));
+  // Even trailing zeros are refused: `1,500` reaches here as `1.500`, a likely thousands separator.
+  if (fraction.length > decimals) {
+    return err(
+      ledgerError(
+        'too-precise',
+        `This currency allows ${decimals} decimals. Do not use thousands separators.`,
+      ),
+    );
   }
-  const magnitude = BigInt(`${whole}${kept.padEnd(decimals, '0')}` || '0');
+  const magnitude = BigInt(`${whole}${fraction.padEnd(decimals, '0')}` || '0');
   return ok(match[1] === '-' ? -magnitude : magnitude);
 }
 
@@ -38,6 +43,10 @@ export function formatDecimal(minor: bigint, decimals: number): string {
   return `${negative ? '-' : ''}${whole}${decimals > 0 ? `.${fraction}` : ''}`;
 }
 
+export function groupThousands(digits: string): string {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 const DISPLAY_MIN_DECIMALS = 2;
 
 export function formatDisplay(
@@ -46,7 +55,7 @@ export function formatDisplay(
 ): string {
   const text = formatDecimal(minor < 0n ? -minor : minor, currency.decimals);
   const [whole, fraction = ''] = text.split('.');
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const grouped = groupThousands(whole);
   const significant = fraction.replace(/0+$/, '');
   const shown =
     significant.length >= DISPLAY_MIN_DECIMALS

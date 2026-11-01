@@ -16,6 +16,15 @@ export type Currency = {
 
 const CODE_PATTERN = /^[A-Z0-9]{2,10}$/;
 
+export function parseDecimalsText(text: string): Result<number, LedgerError> {
+  const trimmed = text.trim();
+  const decimals = Number(trimmed);
+  if (!/^\d+$/.test(trimmed) || !isValidDecimals(decimals)) {
+    return err(ledgerError('invalid-currency', `Decimals must be 0 to ${MAX_DECIMALS}.`));
+  }
+  return ok(decimals);
+}
+
 export function validateCurrency(input: Currency): Result<Currency, LedgerError> {
   const code = input.code.trim().toUpperCase();
   const name = input.name.trim();

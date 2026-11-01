@@ -29,6 +29,7 @@ export function EditAccountScreen() {
   const { submit, error, submitting } = useSubmit(
     (values: AccountFormValues) => ledger.updateAccount({ ...values, id }),
     () => router.back(),
+    { exitsOnSuccess: true },
   );
 
   return (

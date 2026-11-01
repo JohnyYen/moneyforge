@@ -97,21 +97,29 @@ export function TextField({
   );
 }
 
-/** A decimal field. Some Android keyboards only offer a comma, so it maps to the point. */
+/**
+ * A decimal field. Some Android keyboards only offer a comma, so it maps to the point.
+ * That makes `1,500` read as 1.5, so `preview` shows what the text will be stored as.
+ */
 export function AmountField({
   onChangeText,
+  preview,
   ...field
 }: Omit<TextInputProps, 'onChangeText'> & {
   label: string;
   onChangeText: (text: string) => void;
+  preview?: string | null;
 }) {
   return (
-    <TextField
-      keyboardType="numeric"
-      autoCorrect={false}
-      {...field}
-      onChangeText={(text) => onChangeText(text.replace(/,/g, '.'))}
-    />
+    <View style={styles.field}>
+      <TextField
+        keyboardType="numeric"
+        autoCorrect={false}
+        {...field}
+        onChangeText={(text) => onChangeText(text.replace(/,/g, '.'))}
+      />
+      {preview ? <Muted>{preview}</Muted> : null}
+    </View>
   );
 }
 

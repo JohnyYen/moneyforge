@@ -18,8 +18,19 @@ describe('parseDecimal', () => {
     expect(parsed('-0.05', 2)).toBe(-5n);
   });
 
-  it('accepts trailing zeros beyond the currency precision', () => {
-    expect(parsed('1.2300', 2)).toBe(123n);
+  it.each(['1.2300', '1.500', '1.000'])(
+    'rejects %p: digits past the currency precision may be a thousands separator',
+    (text) => {
+      const result = parseDecimal(text, 2);
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'too-precise' } });
+      expect(result.ok ? '' : result.error.message).toMatch(/thousands separators/);
+    },
+  );
+
+  it('accepts as many fractional digits as the currency allows', () => {
+    expect(parsed('1.50', 2)).toBe(150n);
+    expect(parsed('1.500', 3)).toBe(1500n);
   });
 
   it('rejects precision the currency cannot hold instead of rounding', () => {
