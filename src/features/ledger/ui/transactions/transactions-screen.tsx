@@ -48,6 +48,7 @@ export function TransactionsScreen() {
           onAccountChange={setAccountId}
           onLoadMore={() => setLimit((value) => value + TRANSACTION_PAGE_SIZE)}
           onAdd={() => router.push('/transactions/new')}
+          onOpen={(id) => router.push({ pathname: '/transactions/[id]', params: { id } })}
         />
       )}
     </QueryBoundary>

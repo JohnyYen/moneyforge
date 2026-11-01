@@ -42,6 +42,16 @@ type EntryFields = {
 
 type TransactionResult = Result<Transaction, LedgerError>;
 
+/** Adjustments restate a counted balance, so no form can rebuild them. */
+export function isEditable(transaction: Transaction): boolean {
+  return transaction.kind !== 'adjustment';
+}
+
+/** An opening entry mirrors a field of its account and changes with the account. */
+export function isDeletable(transaction: Transaction): boolean {
+  return transaction.metadata?.source !== 'opening-balance';
+}
+
 export function isBalanced(postings: readonly Posting[]): boolean {
   const totals = new Map<string, bigint>();
   for (const { currency, amount } of postings) {

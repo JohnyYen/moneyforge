@@ -23,6 +23,7 @@ export function TransactionsView({
   onAccountChange,
   onLoadMore,
   onAdd,
+  onOpen,
 }: {
   rows: readonly TransactionRowModel[];
   accounts: readonly Account[];
@@ -33,6 +34,7 @@ export function TransactionsView({
   onAccountChange: (accountId: string) => void;
   onLoadMore: () => void;
   onAdd: () => void;
+  onOpen: (id: string) => void;
 }) {
   const filtered = kind !== ALL || accountId !== ALL;
   return (
@@ -60,7 +62,7 @@ export function TransactionsView({
         />
       ) : null}
       {rows.map((row) => (
-        <TransactionRow key={row.id} row={row} />
+        <TransactionRow key={row.id} row={row} onOpen={onOpen} />
       ))}
       {canLoadMore ? <Button label="Load more" variant="secondary" onPress={onLoadMore} /> : null}
     </Screen>

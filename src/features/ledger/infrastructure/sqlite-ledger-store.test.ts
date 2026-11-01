@@ -274,4 +274,14 @@ describe('SQLite ledger store', () => {
     await expect(reentrant.currencies.list()).resolves.toEqual([]);
     await stalling.close();
   });
+
+  it('keeps the original when replacing a transaction fails midway', async () => {
+    const original = income('t1', 'main', 100n);
+    await store.journal.save(original);
+    const broken = income('t1', 'unknown-account', 100n);
+
+    await expect(store.journal.save(broken)).rejects.toThrow(/foreign key/i);
+
+    await expect(store.journal.get('t1')).resolves.toEqual(original);
+  });
 });

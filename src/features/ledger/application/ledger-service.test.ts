@@ -421,6 +421,213 @@ describe('ledger service', () => {
     });
   });
 
+  describe('editing', () => {
+    const expense = async (accountId: string, amount = '10') =>
+      unwrap(await ledger.recordExpense({ accountId, amount, description: 'Lunch' }));
+
+    it('replaces the postings and keeps the identity and the date', async () => {
+      const main = await account('Main', 'USD', '100');
+      const original = await expense(main.id);
+
+      const edited = unwrap(
+        await ledger.updateTransaction(original.id, {
+          kind: 'expense',
+          accountId: main.id,
+          amount: '25.50',
+          description: 'Dinner',
+        }),
+      );
+
+      expect(edited).toMatchObject({
+        id: original.id,
+        occurredAt: original.occurredAt,
+        description: 'Dinner',
+      });
+      await expect(ledger.getTransaction(original.id)).resolves.toEqual(edited);
+      await expect(balanceOf(main.id)).resolves.toBe(7450n);
+      await expect(allPostingsBalance()).resolves.toBe(true);
+    });
+
+    it('moves the entry to a new date and account', async () => {
+      const main = await account('Main', 'USD', '100');
+      const savings = await account('Savings', 'USD', '100');
+      const original = await expense(main.id);
+
+      const edited = unwrap(
+        await ledger.updateTransaction(original.id, {
+          kind: 'expense',
+          accountId: savings.id,
+          amount: '10',
+          occurredAt: '2026-01-05T12:00:00.000Z',
+        }),
+      );
+
+      expect(edited.occurredAt).toBe('2026-01-05T12:00:00.000Z');
+      await expect(balanceOf(main.id)).resolves.toBe(10000n);
+      await expect(balanceOf(savings.id)).resolves.toBe(9000n);
+    });
+
+    it('drops a fee and shrinks to fewer postings', async () => {
+      const main = await account('Main', 'USD', '100');
+      const savings = await account('Savings', 'USD');
+      const original = unwrap(
+        await ledger.recordTransfer({
+          fromAccountId: main.id,
+          toAccountId: savings.id,
+          amount: '40',
+          fee: '1.50',
+        }),
+      );
+
+      const edited = unwrap(
+        await ledger.updateTransaction(original.id, {
+          kind: 'transfer',
+          fromAccountId: main.id,
+          toAccountId: savings.id,
+          amount: '40',
+        }),
+      );
+
+      expect(edited.postings).toHaveLength(2);
+      await expect(balanceOf(main.id)).resolves.toBe(6000n);
+      await expect(allPostingsBalance()).resolves.toBe(true);
+    });
+
+    it('changes the kind', async () => {
+      const main = await account('Main', 'USD', '100');
+      const original = await expense(main.id);
+
+      unwrap(
+        await ledger.updateTransaction(original.id, {
+          kind: 'income',
+          accountId: main.id,
+          amount: '10',
+        }),
+      );
+
+      await expect(balanceOf(main.id)).resolves.toBe(11000n);
+      await expect(allPostingsBalance()).resolves.toBe(true);
+    });
+
+    it('applies the same validation as recording and leaves the original intact', async () => {
+      const dollars = await account('Dollars', 'USD', '100');
+      const euros = await account('Euros', 'EUR');
+      const original = await expense(dollars.id);
+
+      await expect(
+        ledger.updateTransaction(original.id, {
+          kind: 'expense',
+          accountId: dollars.id,
+          amount: '1.500',
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: 'too-precise' } });
+      await expect(
+        ledger.updateTransaction(original.id, {
+          kind: 'conversion',
+          fromAccountId: dollars.id,
+          toAccountId: euros.id,
+          sourceAmount: '10',
+          targetAmount: '50',
+          rate: '0.92',
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: 'inconsistent-conversion' } });
+
+      await expect(ledger.getTransaction(original.id)).resolves.toEqual(original);
+    });
+
+    it('keeps an archived account or category the entry already uses, and no other', async () => {
+      const main = await account('Main', 'USD', '100');
+      const other = await account('Other', 'USD');
+      const food = await categoryNamed('Food');
+      const original = unwrap(
+        await ledger.recordExpense({ accountId: main.id, amount: '10', categoryId: food.id }),
+      );
+      const archive = { type: 'Bank', openingBalance: '0', archived: true };
+      unwrap(await ledger.updateCategory({ id: food.id, name: 'Food', parentId: null, archived: true }));
+      unwrap(await ledger.updateAccount({ ...archive, id: main.id, name: 'Main', openingBalance: '100' }));
+      unwrap(await ledger.updateAccount({ ...archive, id: other.id, name: 'Other' }));
+      const edit = { kind: 'expense', amount: '12', categoryId: food.id } as const;
+
+      unwrap(await ledger.updateTransaction(original.id, { ...edit, accountId: main.id }));
+
+      await expect(
+        ledger.updateTransaction(original.id, { ...edit, accountId: other.id }),
+      ).resolves.toMatchObject({ ok: false, error: { code: 'account-archived' } });
+    });
+
+    it('refuses an unknown transaction', async () => {
+      const main = await account('Main', 'USD');
+
+      await expect(
+        ledger.updateTransaction('missing', { kind: 'income', accountId: main.id, amount: '1' }),
+      ).resolves.toMatchObject({ ok: false, error: { code: 'not-found' } });
+      await expect(ledger.deleteTransaction('missing')).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'not-found' },
+      });
+    });
+
+    it('locks opening balances and reconciliations against editing', async () => {
+      const main = await account('Main', 'USD', '100');
+      const [opening] = await ledger.listTransactions({ accountId: main.id });
+      const adjustment = unwrap(await ledger.reconcile({ accountId: main.id, countedBalance: '90' }));
+      const edit = { kind: 'income', accountId: main.id, amount: '1' } as const;
+
+      for (const id of [opening.id, adjustment?.id ?? '']) {
+        await expect(ledger.updateTransaction(id, edit)).resolves.toMatchObject({
+          ok: false,
+          error: { code: 'transaction-locked' },
+        });
+      }
+      await expect(balanceOf(main.id)).resolves.toBe(9000n);
+    });
+  });
+
+  describe('deleting', () => {
+    it('removes the entry with its postings and restores the balance', async () => {
+      const main = await account('Main', 'USD', '100');
+      const savings = await account('Savings', 'USD');
+      const transfer = unwrap(
+        await ledger.recordTransfer({
+          fromAccountId: main.id,
+          toAccountId: savings.id,
+          amount: '40',
+          fee: '1',
+        }),
+      );
+
+      unwrap(await ledger.deleteTransaction(transfer.id));
+
+      await expect(ledger.getTransaction(transfer.id)).resolves.toBeNull();
+      await expect(balanceOf(main.id)).resolves.toBe(10000n);
+      await expect(balanceOf(savings.id)).resolves.toBe(0n);
+      await expect(
+        driver.all('SELECT 1 FROM postings WHERE transaction_id = ?', [transfer.id]),
+      ).resolves.toEqual([]);
+      await expect(allPostingsBalance()).resolves.toBe(true);
+    });
+
+    it('allows deleting a reconciliation', async () => {
+      const main = await account('Main', 'USD', '100');
+      const adjustment = unwrap(await ledger.reconcile({ accountId: main.id, countedBalance: '90' }));
+
+      unwrap(await ledger.deleteTransaction(adjustment?.id ?? ''));
+
+      await expect(balanceOf(main.id)).resolves.toBe(10000n);
+    });
+
+    it('protects an opening balance, which belongs to its account', async () => {
+      const main = await account('Main', 'USD', '100');
+      const [opening] = await ledger.listTransactions({ accountId: main.id });
+
+      await expect(ledger.deleteTransaction(opening.id)).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'transaction-locked' },
+      });
+      await expect(balanceOf(main.id)).resolves.toBe(10000n);
+    });
+  });
+
   describe('listing', () => {
     it('filters through the store', async () => {
       const main = await account('Main', 'USD');

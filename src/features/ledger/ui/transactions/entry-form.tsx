@@ -15,9 +15,7 @@ import type { Account } from '../../domain/account';
 import type { Category } from '../../domain/category';
 import type { Currency } from '../../domain/currency';
 import { amountPreview, ratePreview } from '../amount-preview';
-
-export const ENTRY_KINDS = ['expense', 'income', 'transfer', 'conversion'] as const;
-export type EntryKind = (typeof ENTRY_KINDS)[number];
+import type { EntryValues } from './entry-values';
 
 const ENTRY_KIND_OPTIONS = [
   { value: 'expense', label: 'Expense' },
@@ -26,20 +24,6 @@ const ENTRY_KIND_OPTIONS = [
   { value: 'conversion', label: 'Conversion' },
 ] as const;
 
-export type EntryValues = {
-  kind: EntryKind;
-  accountId: string | null;
-  toAccountId: string | null;
-  categoryId: string | null;
-  amount: string;
-  targetAmount: string;
-  rate: string;
-  fee: string;
-  feeCurrency: string | null;
-  description: string;
-  day: string;
-};
-
 function accountOptions(accounts: readonly Account[]) {
   return accounts.map((account) => ({
     value: account.id,
@@ -47,38 +31,28 @@ function accountOptions(accounts: readonly Account[]) {
   }));
 }
 
-export function AddTransactionView({
+export function EntryForm({
   accounts,
   categories,
   currencies,
-  initialAccountId,
-  today,
+  initial,
   error,
   submitting,
+  submitLabel = 'Save',
   onSubmit,
+  onDelete,
 }: {
   accounts: readonly Account[];
   categories: readonly Category[];
   currencies: readonly Currency[];
-  initialAccountId: string | null;
-  today: string;
+  initial: EntryValues;
   error: string | null;
   submitting: boolean;
+  submitLabel?: string;
   onSubmit: (values: EntryValues) => void;
+  onDelete?: () => void;
 }) {
-  const [values, setValues] = useState<EntryValues>({
-    kind: 'expense',
-    accountId: initialAccountId ?? accounts[0]?.id ?? null,
-    toAccountId: null,
-    categoryId: null,
-    amount: '',
-    targetAmount: '',
-    rate: '',
-    fee: '',
-    feeCurrency: null,
-    description: '',
-    day: today,
-  });
+  const [values, setValues] = useState(initial);
   const set = <Key extends keyof EntryValues>(key: Key, value: EntryValues[Key]) =>
     setValues((current) => ({ ...current, [key]: value }));
 
@@ -120,7 +94,7 @@ export function AddTransactionView({
         value={values.amount}
         onChangeText={(text) => set('amount', text)}
         preview={amountPreview(values.amount, currencyOf(source?.currencyCode))}
-        autoFocus
+        autoFocus={!onDelete}
       />
       <ChoiceChips
         label={moving ? 'From' : 'Account'}
@@ -208,10 +182,18 @@ export function AddTransactionView({
       />
       <ErrorBanner message={error} />
       <Button
-        label="Save"
+        label={submitLabel}
         disabled={!values.amount || submitting || (moving && !destination)}
         onPress={() => onSubmit(values)}
       />
+      {onDelete ? (
+        <Button
+          label="Delete transaction"
+          variant="secondary"
+          disabled={submitting}
+          onPress={onDelete}
+        />
+      ) : null}
     </Screen>
   );
 }

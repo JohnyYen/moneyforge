@@ -43,6 +43,9 @@ export function AccountDetailScreen() {
             rows={rows}
             canLoadMore={canLoadMore}
             onLoadMore={() => setLimit((value) => value + TRANSACTION_PAGE_SIZE)}
+            onOpenTransaction={(transactionId) =>
+              router.push({ pathname: '/transactions/[id]', params: { id: transactionId } })
+            }
             onAddTransaction={() =>
               router.push({ pathname: '/transactions/new', params: { accountId: id } })
             }

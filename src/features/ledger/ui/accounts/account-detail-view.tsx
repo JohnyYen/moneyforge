@@ -21,6 +21,7 @@ export function AccountDetailView({
   rows,
   canLoadMore,
   onLoadMore,
+  onOpenTransaction,
   onAddTransaction,
   onReconcile,
   onEdit,
@@ -31,6 +32,7 @@ export function AccountDetailView({
   rows: readonly TransactionRowModel[];
   canLoadMore: boolean;
   onLoadMore: () => void;
+  onOpenTransaction: (id: string) => void;
   onAddTransaction: () => void;
   onReconcile: () => void;
   onEdit: () => void;
@@ -53,7 +55,7 @@ export function AccountDetailView({
       <SectionLabel>Transactions</SectionLabel>
       {rows.length === 0 ? <EmptyState title="No transactions yet" /> : null}
       {rows.map((row) => (
-        <TransactionRow key={row.id} row={row} />
+        <TransactionRow key={row.id} row={row} onOpen={onOpenTransaction} />
       ))}
       {canLoadMore ? <Button label="Load more" variant="secondary" onPress={onLoadMore} /> : null}
     </Screen>

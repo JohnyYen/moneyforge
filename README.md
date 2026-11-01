@@ -66,6 +66,12 @@ Money is a `bigint` in minor units, stored as TEXT, because stablecoins reach 18
 
 `src/shared/persistence` holds the `SqlDriver` port, the migrations, and the `expo-sqlite` and `node:sqlite` adapters. Tests run the production SQL on `node:sqlite`.
 
+Editing a transaction rebuilds it through the same factories and validation as recording it, then replaces its postings in one write, so every saved entry still balances. Deleting removes its postings with it. Opening balances change only through their account, and reconciliations can be deleted but not edited.
+
+An amount with more fractional digits than its currency allows is rejected, even when the extra digits are zeros, because `1,500` typed on a comma keyboard reaches the parser as `1.500`. Currencies with 3 or more decimals stay ambiguous, so every amount and rate field previews what will be stored.
+
+A conversion given both a received amount and a rate is rejected when they disagree beyond the precision the rate was written with: a rate of `0.92` accepts anything from `0.915` to `0.925`. Leave the received amount empty to calculate it from the rate.
+
 Net worth leaves archived accounts out. A currency with no stored rate to the base currency is reported as missing, not valued at zero.
 
 ## License
