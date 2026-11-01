@@ -1,5 +1,6 @@
 import { createNodeSqliteDriver } from './node-sqlite-driver';
 import {
+  assertSecureDeleteEnabled,
   assertForeignKeysEnabled,
   createSqlDriver,
   ReentrantTransactionError,
@@ -319,6 +320,27 @@ describe('assertForeignKeysEnabled', () => {
     await driver.exec('PRAGMA foreign_keys = OFF');
 
     await expect(assertForeignKeysEnabled(driver)).rejects.toThrow(/foreign keys/i);
+    await driver.close();
+  });
+});
+
+describe('assertSecureDeleteEnabled', () => {
+  const answering = (row: { secure_delete: number } | undefined) => ({
+    get: async <Row>() => row as Row | undefined,
+  });
+
+  it('accepts a connection that reports it on', async () => {
+    await expect(assertSecureDeleteEnabled(answering({ secure_delete: 1 }))).resolves.toBeUndefined();
+  });
+
+  it.each([[{ secure_delete: 0 }], [undefined]])('refuses %j', async (row) => {
+    await expect(assertSecureDeleteEnabled(answering(row))).rejects.toThrow('secure_delete');
+  });
+
+  it('reads back what real SQLite reports', async () => {
+    const driver = createNodeSqliteDriver();
+    await driver.exec('PRAGMA secure_delete = ON;');
+    await expect(assertSecureDeleteEnabled(driver)).resolves.toBeUndefined();
     await driver.close();
   });
 });

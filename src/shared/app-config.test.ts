@@ -39,6 +39,10 @@ describe('app config', () => {
     expect(() => createConfig(context)).toThrow('Unknown APP_VARIANT: beta');
   });
 
+  it('keeps the database out of cloud backup', () => {
+    expect(createConfig(context).android?.allowBackup).toBe(false);
+  });
+
   it('targets Android only', () => {
     expect(createConfig(context).platforms).toEqual(['android']);
   });

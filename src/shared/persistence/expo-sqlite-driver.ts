@@ -2,6 +2,7 @@ import { openDatabaseAsync } from 'expo-sqlite';
 
 import {
   assertForeignKeysEnabled,
+  assertSecureDeleteEnabled,
   createSqlDriver,
   type SqlDriver,
   type SqlStatements,
@@ -15,7 +16,9 @@ import {
  */
 export async function openExpoSqliteDriver(databaseName: string): Promise<SqlDriver> {
   const db = await openDatabaseAsync(databaseName);
-  await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+  await db.execAsync(
+    'PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;',
+  );
 
   const connection: SqlStatements = {
     exec: (sql) => db.execAsync(sql),
@@ -30,6 +33,7 @@ export async function openExpoSqliteDriver(databaseName: string): Promise<SqlDri
 
   try {
     await assertForeignKeysEnabled(connection);
+    await assertSecureDeleteEnabled(connection);
   } catch (error) {
     await db.closeAsync();
     throw error;

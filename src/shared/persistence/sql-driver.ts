@@ -48,6 +48,14 @@ export async function assertForeignKeysEnabled(connection: Pick<SqlStatements, '
   }
 }
 
+/** Erased message text is overwritten on disk, not only unlinked from the tree. */
+export async function assertSecureDeleteEnabled(connection: Pick<SqlStatements, 'get'>) {
+  const row = await connection.get<{ secure_delete: number }>('PRAGMA secure_delete');
+  if (row?.secure_delete !== 1) {
+    throw new Error('SQLite secure_delete is off, so erased messages could stay on disk.');
+  }
+}
+
 const DEFAULT_STALL_TIMEOUT_MS = 2000;
 
 /** SQLite undoes the transaction itself on some errors, which makes ROLLBACK fail harmlessly. */

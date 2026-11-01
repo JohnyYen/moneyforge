@@ -28,6 +28,8 @@ export default function createConfig({ config }: ConfigContext): ExpoConfig {
     userInterfaceStyle: 'automatic',
     android: {
       package: variant.package,
+      // The database holds financial history, so it must not reach cloud backup.
+      allowBackup: false,
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',
         foregroundImage: './assets/images/android-icon-foreground.png',
