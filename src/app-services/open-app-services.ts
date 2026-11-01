@@ -16,5 +16,7 @@ export async function openAppServices(): Promise<AppServices> {
     generateId,
   });
   await services.ledger.initialize();
+  // Retried on the next start: a failed cleanup must not keep the user out of their ledger.
+  await services.rules.purgeExpired(new Date()).catch(() => undefined);
   return services;
 }

@@ -1,6 +1,8 @@
 import { createLedgerService } from '@/features/ledger/application/ledger-service';
 import type { Clock, IdGenerator } from '@/features/ledger/application/ports';
 import { createSqliteLedgerStore } from '@/features/ledger/infrastructure/sqlite-ledger-store';
+import { createRulesService } from '@/features/rules/application/rules-service';
+import { createSqliteRuleStore } from '@/features/rules/infrastructure/sqlite-rule-store';
 import { createSplitService } from '@/features/split/application/split-service';
 import {
   createSqliteSplitStore,
@@ -22,6 +24,7 @@ export function createAppServices(deps: {
       generateId,
     }),
     split: createSplitService({ store: createSqliteSplitStore(driver), clock, generateId }),
+    rules: createRulesService({ store: createSqliteRuleStore(driver), clock, generateId }),
   };
 }
 

@@ -129,6 +129,50 @@ async function writeStructure(
   return structure;
 }
 
+export type ApplyStructureInput = {
+  readonly transactionId: string;
+  readonly structureId: string;
+};
+
+/**
+ * Records the plan and moves no money. Takes the repositories of a running write, so a
+ * feature that posts income can split it in the same write. Refuses before writing.
+ */
+export async function applySplit(
+  repositories: SplitRepositories,
+  { clock, generateId }: Pick<SplitDeps, 'clock' | 'generateId'>,
+  input: ApplyStructureInput,
+): Promise<SplitResult<SplitDetails>> {
+  const { journal, splits } = repositories;
+  const transaction = await journal.get(input.transactionId);
+  if (!transaction) return notFound('Transaction');
+  const posting = incomePosting(transaction);
+  if (transaction.kind !== 'income' || !posting) {
+    return err(splitError('not-income', 'Only income can be split.'));
+  }
+  if (await splits.getRunForTransaction(transaction.id)) {
+    return err(splitError('already-split', 'This income is already split.'));
+  }
+  const structure = await splits.getStructure(input.structureId);
+  if (!structure) return notFound('Structure');
+  if (!structure.active) return archived();
+  const targets = await checkTargets(repositories, structure.lines);
+  if (!targets.ok) return targets;
+
+  const { run, moves } = createSplitRun({
+    id: generateId(),
+    transactionId: transaction.id,
+    structure,
+    sourceAccountId: posting.accountId,
+    currencyCode: posting.currency,
+    amount: posting.amount,
+    createdAt: clock.now().toISOString(),
+    generateId,
+  });
+  await splits.saveRun(run, moves);
+  return ok({ run, moves });
+}
+
 export function createSplitService({ store, clock, generateId }: SplitDeps) {
   const details = async (transactionId: string): Promise<SplitDetails | null> => {
     const run = await store.splits.getRunForTransaction(transactionId);
@@ -206,41 +250,8 @@ export function createSplitService({ store, clock, generateId }: SplitDeps) {
       };
     },
 
-    /** Records the plan and moves no money. */
-    applyStructure: (input: {
-      readonly transactionId: string;
-      readonly structureId: string;
-    }): Promise<SplitResult<SplitDetails>> =>
-      store.atomic(async (repositories) => {
-        const { journal, splits } = repositories;
-        const transaction = await journal.get(input.transactionId);
-        if (!transaction) return notFound('Transaction');
-        const posting = incomePosting(transaction);
-        if (transaction.kind !== 'income' || !posting) {
-          return err(splitError('not-income', 'Only income can be split.'));
-        }
-        if (await splits.getRunForTransaction(transaction.id)) {
-          return err(splitError('already-split', 'This income is already split.'));
-        }
-        const structure = await splits.getStructure(input.structureId);
-        if (!structure) return notFound('Structure');
-        if (!structure.active) return archived();
-        const targets = await checkTargets(repositories, structure.lines);
-        if (!targets.ok) return targets;
-
-        const { run, moves } = createSplitRun({
-          id: generateId(),
-          transactionId: transaction.id,
-          structure,
-          sourceAccountId: posting.accountId,
-          currencyCode: posting.currency,
-          amount: posting.amount,
-          createdAt: clock.now().toISOString(),
-          generateId,
-        });
-        await splits.saveRun(run, moves);
-        return ok({ run, moves });
-      }),
+    applyStructure: (input: ApplyStructureInput): Promise<SplitResult<SplitDetails>> =>
+      store.atomic((repositories) => applySplit(repositories, { clock, generateId }, input)),
 
     splitDetails: details,
     listPendingMoves: () => store.splits.listPendingMoves(),
