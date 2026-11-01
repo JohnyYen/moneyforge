@@ -5,6 +5,9 @@ import {
   createMessageCapture,
   type MessageCapturePort,
 } from '@/features/rules/application/message-capture';
+import type { ExpectedCashFlowSource } from '@/features/planning/application/ports';
+import { createPlanningService } from '@/features/planning/application/planning-service';
+import { createSqlitePlanningStore } from '@/features/planning/infrastructure/sqlite-planning-store';
 import type { SecretGenerator } from '@/features/rules/application/ports';
 import { createSqliteLedgerStore } from '@/features/ledger/infrastructure/sqlite-ledger-store';
 import { createRulesService } from '@/features/rules/application/rules-service';
@@ -23,6 +26,7 @@ export function createAppServices(deps: {
   readonly generateId: IdGenerator;
   readonly generateSecret: SecretGenerator;
   readonly messageCapture?: MessageCapturePort;
+  readonly expectedSources?: readonly ExpectedCashFlowSource[];
 }) {
   const { driver, clock, generateId, generateSecret } = deps;
   const rules = createRulesService({
@@ -44,6 +48,12 @@ export function createAppServices(deps: {
       generateId,
     }),
     split: createSplitService({ store: createSqliteSplitStore(driver), clock, generateId }),
+    planning: createPlanningService({
+      store: createSqlitePlanningStore(driver),
+      clock,
+      generateId,
+      expectedSources: deps.expectedSources,
+    }),
     rules,
     capture,
   };

@@ -127,7 +127,7 @@ describe('upgrading a version 1 database', () => {
 
     await expect(snapshot()).resolves.toEqual(before);
     await expect(driver.all('SELECT version FROM schema_migrations ORDER BY version')).resolves.toEqual(
-      [{ version: 1 }, { version: 2 }, { version: 3 }],
+      [{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }],
     );
     await expect(driver.all('PRAGMA foreign_key_check')).resolves.toEqual([]);
   });

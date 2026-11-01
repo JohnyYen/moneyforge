@@ -1,0 +1,141 @@
+import { err, ok, type Result } from '@/shared/result';
+
+import { addDays, laterDay, type Day } from './calendar';
+import type { ExpectedFlow } from './cash-flow';
+import { planningError, type PlanningError } from './planning-error';
+import { occurrencesBetween, validateSchedule, type Schedule } from './schedule';
+
+export const RECURRING_KINDS = ['income', 'expense', 'transfer'] as const;
+export type RecurringKind = (typeof RECURRING_KINDS)[number];
+
+export const RECURRING_MODES = ['ask', 'auto'] as const;
+export type RecurringMode = (typeof RECURRING_MODES)[number];
+
+export type RecurringItem = {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: RecurringKind;
+  readonly accountId: string;
+  /** Transfers only. */
+  readonly toAccountId: string | null;
+  readonly amount: bigint;
+  readonly currencyCode: string;
+  readonly categoryId: string | null;
+  readonly schedule: Schedule;
+  readonly mode: RecurringMode;
+  /** Income only: applies the split structure the ledger would propose for it. */
+  readonly applySplit: boolean;
+  readonly active: boolean;
+  /** The last day already turned into occurrences. Never moves back. */
+  readonly materializedThrough: Day | null;
+};
+
+export type OccurrenceStatus = 'pending' | 'posted' | 'skipped';
+
+/** A copy of the item on its due date, so editing the item never changes it. */
+export type Occurrence = {
+  readonly id: string;
+  readonly itemId: string;
+  readonly dueOn: Day;
+  readonly status: OccurrenceStatus;
+  readonly kind: RecurringKind;
+  readonly accountId: string;
+  readonly toAccountId: string | null;
+  readonly amount: bigint;
+  readonly currencyCode: string;
+  readonly categoryId: string | null;
+  readonly description: string;
+  readonly applySplit: boolean;
+  /** Empty once the posted transaction is deleted: the date stays used. */
+  readonly transactionId: string | null;
+  readonly note: string | null;
+};
+
+export function validateRecurringFields<Item extends RecurringItem>(
+  item: Item,
+): Result<Item, PlanningError> {
+  const invalid = (message: string) => err(planningError('invalid-recurring', message));
+  const name = item.name.trim();
+  if (!name) return invalid('Enter a name.');
+  if (!RECURRING_KINDS.includes(item.kind)) return invalid('Choose income, expense, or transfer.');
+  if (!RECURRING_MODES.includes(item.mode)) return invalid('Choose how it gets recorded.');
+  if (item.amount <= 0n) return invalid('The amount must be greater than zero.');
+  const transfer = item.kind === 'transfer';
+  if (transfer && !item.toAccountId) return invalid('Choose the account that receives it.');
+  if (transfer && item.toAccountId === item.accountId) {
+    return invalid('Choose two different accounts.');
+  }
+  if (item.applySplit && item.kind !== 'income') return invalid('Only income can be split.');
+  const schedule = validateSchedule(item.schedule);
+  if (!schedule.ok) return schedule;
+  return ok({
+    ...item,
+    name,
+    schedule: schedule.value,
+    toAccountId: transfer ? item.toAccountId : null,
+    categoryId: transfer ? null : item.categoryId,
+  });
+}
+
+export function occurrenceFrom(item: RecurringItem, dueOn: Day, id: string): Occurrence {
+  return {
+    id,
+    itemId: item.id,
+    dueOn,
+    status: 'pending',
+    kind: item.kind,
+    accountId: item.accountId,
+    toAccountId: item.toAccountId,
+    amount: item.amount,
+    currencyCode: item.currencyCode,
+    categoryId: item.categoryId,
+    description: item.name,
+    applySplit: item.applySplit,
+    transactionId: null,
+    note: null,
+  };
+}
+
+export function flowsOfOccurrence(occurrence: Occurrence, day: Day): ExpectedFlow[] {
+  const { kind, accountId, toAccountId, amount, description: label } = occurrence;
+  if (kind === 'income') return [{ day, accountId, minor: amount, label }];
+  const out = { day, accountId, minor: -amount, label };
+  return kind === 'transfer' && toAccountId
+    ? [out, { day, accountId: toAccountId, minor: amount, label }]
+    : [out];
+}
+
+/** What recurring items will do through `until`. Anything overdue counts as due today. */
+export function recurringFlows(
+  items: readonly RecurringItem[],
+  pending: readonly Occurrence[],
+  { today, until }: { readonly today: Day; readonly until: Day },
+): ExpectedFlow[] {
+  const flows = pending.flatMap((occurrence) =>
+    flowsOfOccurrence(occurrence, laterDay(occurrence.dueOn, today)),
+  );
+  for (const item of items) {
+    if (!item.active) continue;
+    const { materializedThrough, schedule } = item;
+    const after = materializedThrough ? addDays(materializedThrough, 1) : schedule.startOn;
+    for (const dueOn of occurrencesBetween(schedule, after, until)) {
+      flows.push(...flowsOfOccurrence(occurrenceFrom(item, dueOn, ''), laterDay(dueOn, today)));
+    }
+  }
+  return flows;
+}
+
+/** A one-off the user expects, which affects only the projection until it really happens. */
+export type PlannedItem = {
+  readonly id: string;
+  readonly plannedOn: Day;
+  readonly kind: 'income' | 'expense';
+  readonly accountId: string;
+  readonly amount: bigint;
+  readonly description: string;
+};
+
+export function flowOfPlanned(item: PlannedItem): ExpectedFlow {
+  const { plannedOn: day, accountId, amount, kind, description: label } = item;
+  return { day, accountId, minor: kind === 'income' ? amount : -amount, label };
+}

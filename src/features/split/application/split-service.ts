@@ -173,6 +173,36 @@ export async function applySplit(
   return ok({ run, moves });
 }
 
+/**
+ * What to offer after income is recorded, or `null` when there is nothing to offer. Takes
+ * repositories so a feature that posts income can ask from inside the same write.
+ */
+export async function splitProposalFor(
+  { journal, splits }: Pick<SplitRepositories, 'journal' | 'splits'>,
+  transactionId: string,
+): Promise<SplitProposal | null> {
+  const transaction = await journal.get(transactionId);
+  if (transaction?.kind !== 'income') return null;
+  const posting = incomePosting(transaction);
+  if (!posting || (await splits.getRunForTransaction(transactionId))) return null;
+  const structures = (await splits.listStructures()).filter(({ active }) => active);
+  if (structures.length === 0) return null;
+
+  const candidates = [
+    transaction.categoryId && (await splits.getDefault('category', transaction.categoryId)),
+    await splits.getDefault('account', posting.accountId),
+  ];
+  const proposed = candidates.find((id) => structures.some((item) => item.id === id));
+  return {
+    transactionId,
+    sourceAccountId: posting.accountId,
+    amount: posting.amount,
+    currencyCode: posting.currency,
+    structures,
+    proposedStructureId: proposed ?? null,
+  };
+}
+
 export function createSplitService({ store, clock, generateId }: SplitDeps) {
   const details = async (transactionId: string): Promise<SplitDetails | null> => {
     const run = await store.splits.getRunForTransaction(transactionId);
@@ -225,30 +255,7 @@ export function createSplitService({ store, clock, generateId }: SplitDeps) {
         return ok(undefined);
       }),
 
-    /** What to offer after income is recorded, or `null` when there is nothing to offer. */
-    splitProposal: async (transactionId: string): Promise<SplitProposal | null> => {
-      const { journal, splits } = store;
-      const transaction = await journal.get(transactionId);
-      if (transaction?.kind !== 'income') return null;
-      const posting = incomePosting(transaction);
-      if (!posting || (await splits.getRunForTransaction(transactionId))) return null;
-      const structures = (await splits.listStructures()).filter(({ active }) => active);
-      if (structures.length === 0) return null;
-
-      const candidates = [
-        transaction.categoryId && (await splits.getDefault('category', transaction.categoryId)),
-        await splits.getDefault('account', posting.accountId),
-      ];
-      const proposed = candidates.find((id) => structures.some((item) => item.id === id));
-      return {
-        transactionId,
-        sourceAccountId: posting.accountId,
-        amount: posting.amount,
-        currencyCode: posting.currency,
-        structures,
-        proposedStructureId: proposed ?? null,
-      };
-    },
+    splitProposal: (transactionId: string) => splitProposalFor(store, transactionId),
 
     applyStructure: (input: ApplyStructureInput): Promise<SplitResult<SplitDetails>> =>
       store.atomic((repositories) => applySplit(repositories, { clock, generateId }, input)),
