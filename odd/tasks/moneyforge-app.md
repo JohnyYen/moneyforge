@@ -46,7 +46,7 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `991395a`.
+Review base for the next candidate: `b2bb789`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
@@ -58,6 +58,7 @@ Review base for the next candidate: `991395a`.
 - [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen, Android share target. Depends on an Android toolchain for build proof. Background capture must not open a second database connection: all access goes through the one queued `SqlDriver`, because a second connection would lose `PRAGMA foreign_keys` and `secure_delete` and escape the write queue that dedup relies on. Status: code complete; Kotlin never compiled; no Gradle build, no APK, no device run, user asked to install nothing yet.
 - [x] T5.1 T5 review advisories: keep the queue on a read failure, guard extra removal, keep a consumed share from replaying after process death, require a real amount for the authorization code exemption, make drain independent of navigation. Kotlin uncompiled. Commit: `f44a2e1`.
 - [x] T6 Planning: flexible budgets, recurring items, cash flow projection. Commits: `ce411fd`, `70e822f`.
+- [x] T6.1 T6 hardening: verified review findings on backfill of auto items, budget and recurring double counts, posted notes, rollover edits, refunds, restore on a due date, per-date markers, future budgets, currency decimals, unprojected transfers, and rate lookups. Commits: `a33fdc5`, `5485a50`.
 - [ ] T7 Wealth: assets, asset cash flow, read-only on-chain balances.
 - [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy. Rule packs exclude samples. Backup must carry `rules.dedup_secret`, or every stored dedup key stops matching after a restore.
 
@@ -326,6 +327,35 @@ T6 evidence:
   - Budgets in the projection: only with opt-in, what remains of each current period leaves the total, never an account, once, on the day the period ends or on the horizon's last day. An overspent budget reserves nothing. Later periods are not reserved, and a recurring expense in a budgeted category counts twice under this option.
   - Planned one-offs dated before today are ignored, not moved up.
   - `ExpectedCashFlowSource` returns `ExpectedFlow`s in the account's currency, passed through `createAppServices` as `expectedSources`. T7 implements it.
+- review: medium, granted by the user, native review refused with lens_context_budget_exceeded; independent verifier found 1 blocker and 4 majors, fixed in T6.1
+
+T6.1 done. Route: delegated direct; 2+ non-trivial files.
+
+T6.1 evidence:
+
+- RED: `pnpm test --testPathPatterns features/planning`: 36 failed of 238, 6 suites, and the new reservation suite failed with `Cannot find module`. Finding 7 failed through the changed `stops while archived` test. Finding 13 is spacing only, with no behavior to test.
+- GREEN: `pnpm test`: 51 suites, 1068 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exported one 3.3 MB Hermes bundle.
+- The planning suites also passed with `TZ` set to `America/New_York`, `Pacific/Auckland`, and `Pacific/Pago_Pago`, 258 of 258 each.
+- Blocker fixed: a daily `auto` item with start 2016 now posts one entry, today's. The brief's scenario, 1000 with two 100 budgets on one category and a 40 recurring expense, ends at 900.
+- No migration changed: migration 004 already held everything this needed.
+- Not run: no device run, Gradle build, or screen rendering test. The Plan tab's notes section and dismiss, the editor notices, the refund chips, and the budget hints are compiled, never executed. `pastStartNotice` and `budgetRow` are tested on their own.
+- Decisions:
+  - Supersedes "a new item with a past start backfills from that start, in `auto` mode too". A new `auto` item starts with the marker on yesterday. An existing `auto` item still catches up after days away, with no cap.
+  - The cap keeps the newest 60 dates of an `ask` item, and earlier dates are gone for good once the marker passes them. Keeping the oldest would add 60 more on every run, because `materializeDue` runs on each Plan tab focus, so a 2016 start would still end at 3653 rows. The notice is a note on the oldest kept occurrence, which survives the editor closing and clears when that date is confirmed. So a person away from a daily `ask` item for more than 60 days loses the older dates, with that note.
+  - Beyond the brief: an `ask` item edited to `auto` moves its marker up to yesterday, so a backlog never posts.
+  - Supersedes "a recurring expense in a budgeted category counts twice under this option". The reservation moved to the pure `reserveBudgets` in `domain/budget-reservation.ts`. Each budget subtracts all of its own expected outflows, not only unconsumed ones, plus what earlier budgets sharing a category reserved. That gives the brief's rule: the flow leaves once, and the 860 and 800 outcomes do not occur. Budgets go in name order.
+  - Overlap shares the whole earlier reservation even when only one category is shared, so partly overlapping budgets can reserve less than the most they allow.
+  - Only outflows reduce a reservation, and an overdue pending date counts against the current period, since the projection dates it today, even though confirming it would date it in its own period.
+  - `ExpectedFlow.categoryId` is optional, so a T7 source does not have to supply one. Flows on accounts outside the projection cover nothing.
+  - Supersedes "restoring moves it to today". The marker moves to yesterday, so a restore on a due date keeps that date.
+  - Supersedes "a refund recorded as income does not lower a budget". Income in a budget's categories is negative spending, so `spent` can go below zero, and the bar then reads empty. History is unchanged.
+  - Editing the amount, period, or rollover moves `startsOn` to today, or to a custom budget's own first day when that is later, and the carry starts from zero. Categories and currency do not restart it, as the brief lists; both also recompute past periods.
+  - Posted notes show the newest 50. A pending note cannot be dismissed, because it explains what still needs doing.
+  - `CurrencyUsageGuard` is a port on `LedgerRepositories`, defaulting to no other use, and `createAppServices` passes `planningCurrencyUsage`. Only the ledger service's store needs it, since only `updateCurrency` reads it. Planned rows have no currency, so that check joins their account.
+  - `converterOn` resolves a rate once. A zero balance in a currency with no rate still does not report it.
 
 ## Next step
 
