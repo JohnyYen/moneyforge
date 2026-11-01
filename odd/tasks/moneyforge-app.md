@@ -56,8 +56,8 @@ Review base for the next candidate: `991395a`.
 - [x] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste input. Share input moved to T5. Commits: `599e7d8`, `ba5ea65`.
 - [x] T4.1 T4 hardening: verified review findings on one-time codes, number scanning, replays, lone transfer sides, reference keys, cross-currency pairs, field caps, purge, rule samples, keyed hashes, `secure_delete`, and `allowBackup`. Commits: `7b1a098`, `49a47f4`.
 - [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen, Android share target. Depends on an Android toolchain for build proof. Background capture must not open a second database connection: all access goes through the one queued `SqlDriver`, because a second connection would lose `PRAGMA foreign_keys` and `secure_delete` and escape the write queue that dedup relies on. Status: code complete; Kotlin never compiled; no Gradle build, no APK, no device run, user asked to install nothing yet.
-- [ ] T5.1 T5 review advisories: keep the queue on a read failure, guard extra removal, keep a consumed share from replaying after process death, require a real amount for the authorization code exemption, make drain independent of navigation.
-- [ ] T6 Planning: flexible budgets, recurring items, cash flow projection.
+- [x] T5.1 T5 review advisories: keep the queue on a read failure, guard extra removal, keep a consumed share from replaying after process death, require a real amount for the authorization code exemption, make drain independent of navigation. Kotlin uncompiled. Commit: `f44a2e1`.
+- [x] T6 Planning: flexible budgets, recurring items, cash flow projection. Commits: `ce411fd`, `70e822f`.
 - [ ] T7 Wealth: assets, asset cash flow, read-only on-chain balances.
 - [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy. Rule packs exclude samples. Backup must carry `rules.dedup_secret`, or every stored dedup key stops matching after a restore.
 
@@ -278,22 +278,55 @@ T5 evidence:
   - On a Play bundle, or any binary without the module, `requireOptionalNativeModule` returns null and `absentMessageCapture` makes everything inert. A deep link to `/rules/capture` redirects to `/rules`.
 - `.gitignore` has `android/`, which also matches `modules/message-capture/android`, so those sources were added with `git add -f`. They stay tracked, but a new file there is ignored until `.gitignore` gets `!modules/**/android/` and `!modules/**/android/**`.
 - Environment: text sent through this tool had `\uXXXX` escapes decoded into raw characters, so the Kotlin pattern and the fixture were rewritten from Python and checked to be ASCII.
-
-T5 review: `review: medium, approved by native review; advisories addressed in T5.1`.
+- review: medium, approved by native review; advisories addressed in T5.1
 
 T5.1 done. Route: delegated direct; 2+ non-trivial files.
 
 T5.1 evidence:
 
 - RED: `pnpm test --testPathPatterns 'capture-host-flow|domain/message'`: 2 suites failed, 8 failed of 64, the flow suite with `Cannot find module`. The Kotlin fixes have no test and were never compiled.
-- GREEN: 13 rules suites, 432 tests passed. Full checks are recorded with T6.
+- GREEN: 13 rules suites, 432 tests passed. `pnpm test`: 41 suites, 810 tests passed; typecheck and lint exit 0.
 - Decisions:
   - The queue treats only a missing file as empty. Any other read failure propagates, so `append`, `remove`, and `read` fail and leave the file. JSON that cannot be parsed moves to `message-capture-queue.corrupt.json`, the newest replacing an older one, so unreadable messages stay bounded. Nothing reads that file back.
   - The receiver's `runCatching` absorbs an `append` failure, so that SMS stays only in the default SMS app, and JS `drainQueue` reads a failed read as empty until the next drain.
   - A launch intent can replay after process death because Android saves it, so `takeSharedText` compares a SHA-256 digest of the text with a digest kept in preferences. `OnNewIntent` neither reads nor writes the digest, because a new intent cannot replay and writing it would lose the digest of the launch intent that can. Cost: launching the app by sharing the exact text of the last launch share opens nothing.
   - `hasMoneyAmount` replaces counting numbers. Currency codes are a known list, because any 3 letters would pass `REF 5521`. An obscure currency with no decimals and no amount word therefore fails toward privacy. The authorization code digits are removed first, so `authorization code of 884211` cannot prove itself. `de 2026`, `por 5 minutos`, and `of 6 digits` do not count. A year-shaped amount such as `of 2000` beside an authorization code is dropped, on the same privacy side.
-  - `createCaptureHostFlow` drains on start and foreground with no navigation, takes a share as soon as it arrives, and opens the paste screen once the navigator is ready. If the key never appears, draining still works and only the share waits. `CaptureHost` uses the imperative `router`, so the flow is not rebuilt.
+  - Supersedes the T5 note on the `useRootNavigationState()?.key` wait. `createCaptureHostFlow` drains on start and foreground with no navigation, takes a share as soon as it arrives, and opens the paste screen once the navigator is ready. If the key never appears, draining still works and only the share waits. `CaptureHost` uses the imperative `router`, so the flow is not rebuilt.
+
+T6 done. Route: delegated direct; 2+ non-trivial files.
+
+T6 evidence:
+
+- RED: domain, 6 suites failed with `Cannot find module`. Application, 52 failed of 70. UI model, its suite failed with `Cannot find module`.
+- GREEN: `pnpm test`: 50 suites, 1004 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exit 0, one 3.3 MB Hermes bundle.
+- The planning suites also passed with `TZ` set to `America/New_York`, `Pacific/Auckland`, `Asia/Kolkata`, and `Pacific/Pago_Pago`, 194 of 194 each.
+- A test caught `updateItem` keeping the old fields, because `existing` overwrote the input. Fixed.
+- Mutations, each failing tests: confirm with no pending check (1), every month capped at 28 (4), missing rate read as zero (4), zero counted as negative (1), week start ignored (1), marker never written (3). Removing the occurrence lookup failed nothing at first, because the unique key covers races. A new test for a restart after a marker that was never written then failed on it (1).
+- Tests prove exact bigint on 18 decimal amounts, both ends of each period kind, month-end clamping, leap years, no double materialization across restarts and overlap, balanced auto posts, missing rates reported, and first negative dates.
+- Not run: no device run, Gradle build, or screen rendering test. Migration 004 ran on `node:sqlite` only, never under `expo-sqlite`. Every Plan screen, `ProgressBar`, `BalanceBars`, `ToggleChips`, the tab icon, and `materializeDue` at app start are compiled, never executed. `plan-model` is tested on its own.
+- Decisions:
+  - The ledger has no reversal kind. Spending is `kind = 'expense'` only, so transfers, conversions, adjustments, and transfer fees never count. A refund recorded as income does not lower a budget or history expense. A deleted expense leaves both.
+  - A budget's categories include their subcategories. Beyond the brief. A cycle in parents ends the walk.
+  - Budget conversion uses the rate of the expense day. `findRate` returns nothing for a rate dated later, so that currency is reported as missing even when a later rate exists.
+  - Rollover carries surplus and overspend, starting with the period holding `startsOn`: the creation day, or a custom budget's own first day.
+  - Yearly budgets take a start month as well as a start day, since a day alone cannot name a day of the year. Beyond the brief.
+  - Occurrences copy the item, so an edit reaches only dates after `materialized_through`. Editing a schedule cannot add past dates.
+  - A new item with a past start backfills from that start, in `auto` mode too, so a daily item started long ago posts many entries at once. There is no cap.
+  - Each date is one write. A refused post writes pending with a note in that write, and a thrown failure rolls back whole and then writes pending in a second one. If even that fails, the date and later ones of that item wait, and the marker stays back. Other items continue.
+  - `materialized_through` moves to today only after all of an item's dates exist. Restoring an archived item moves it to today, so archived time does not come back.
+  - `materializeDue` also runs when the Plan tab gains focus and after saving an item, for an app left open across midnight. Beyond the brief.
+  - Posted occurrences are dated at local noon of the due day, which always exists under daylight saving. A deleted transaction leaves the occurrence `posted` with no link, so the date does not return.
+  - A recurring transfer needs one currency, because a conversion needs a rate that a template cannot know.
+  - Income with `applySplit` uses `splitProposalFor`, extracted from `split-service.ts` so it runs inside the posting write. No default structure, or a refused split, leaves the income posted with a note.
+  - Confirming edits amount, description, and date. Category and account are not editable there, and a skip is final, so a mistaken skip needs a manual entry.
+  - Projection totals convert at today's rates. Pending and overdue dates count as due today. Archived accounts and their flows are left out. Pending split moves are not projected.
+  - Budgets in the projection: only with opt-in, what remains of each current period leaves the total, never an account, once, on the day the period ends or on the horizon's last day. An overspent budget reserves nothing. Later periods are not reserved, and a recurring expense in a budgeted category counts twice under this option.
+  - Planned one-offs dated before today are ignored, not moved up.
+  - `ExpectedCashFlowSource` returns `ExpectedFlow`s in the account's currency, passed through `createAppServices` as `expectedSources`. T7 implements it.
 
 ## Next step
 
-T6 planning: flexible budgets, recurring items, cash flow projection. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, and rules screens there, including migrations 002 and 003 over an existing database under `expo-sqlite`.
+T7 wealth: assets, asset cash flow through `ExpectedCashFlowSource`, read-only on-chain balances. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, and Plan screens there, including migrations 002, 003, and 004 over an existing database under `expo-sqlite`.
