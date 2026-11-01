@@ -46,15 +46,15 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `31855a1`.
+Review base for the next candidate: `0d2e9cc`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
 - [x] T2.1 Ledger hardening: verified T2 defects (amount entry, rollback recovery, posting load paging, currency decimals, conversion consistency, double submit, queue re-entrancy, same-day rate test, foreign key check) plus editing and deleting transactions. Commits: `1ed15f4`, `f6d34bd`.
 - [x] T3 Income split: structures, percentages, pending move tasks, screens. Commits: `caf80e7`, `20ac32f`.
 - [x] T3.1 T3 hardening: conversion tolerance independent of how the rate is written, stall deadline from the first waiter, previews that reflect rejection, derived received amount preview, stale save error, metadata kept on edit, forms that cannot strand after saving, migration upgrade test. Commit: `d55be54`.
-- [ ] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste and share input.
-- [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen. Depends on an Android toolchain for build proof.
+- [x] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste input. Share input moved to T5. Commits: `599e7d8`, `ba5ea65`.
+- [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen, Android share target. Depends on an Android toolchain for build proof.
 - [ ] T6 Planning: flexible budgets, recurring items, cash flow projection.
 - [ ] T7 Wealth: assets, asset cash flow, read-only on-chain balances.
 - [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy.
@@ -177,7 +177,39 @@ T3.1 evidence:
   - After a failure following a successful save, the gate of a screen that exits stays closed and the banner says "Saved, but this screen could not update. Go back to continue." Reopening it would offer a second write of a stored change.
   - `router.back()` with no history is a silent no-op, not a throw, so every exit goes through `leaveScreen`, which goes home instead. `onSuccess` may return a promise, so the split proposal step after recording is covered too.
 - Skipped on purpose: the finding that editing an older conversion can fail the new tolerance. There are no released users, so no legacy data exists.
+- review: medium, reviewed and approved by native review (one lens); advisory R3-untested-error-clearing left as later work.
+
+T4 done. Route: delegated direct; 2+ non-trivial files.
+
+T4 evidence:
+
+- RED, domain: 5 suites failed with `Cannot find module`. RED, application and storage: 91 failed of 91 across 2 suites. RED, UI model: its suite failed with `Cannot find module`.
+- GREEN: `pnpm test`: 35 suites, 597 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `pnpm expo export --platform android`: exit 0, one 3.1 MB Hermes bundle.
+- Acceptance: a test snapshots every row of every table around a message from an unknown sender and finds no change, and another finds neither the body nor the sender in any column. Own-transfer tests cover both arrival orders, one source or two, a race, and a conversion with both amounts.
+- Most of the application suite passed on its first run against real code, so these mutations were run, and each failed tests: `atomic` with no transaction (5), posted sides not offered as candidates (2), allowlist ignoring `enabled` (1), body kept on post (30), one-time code check removed (4), pairing ignoring the counterpart (1).
+- Not run: no device run, Gradle build, or screen rendering test, since no render test library is installed. Migration 003 ran on `node:sqlite` over a version 1 database with data, never under `expo-sqlite`. Every new screen and `purgeExpired` at app start are compiled, never executed. `rules-model` is tested on its own.
+- Decisions:
+  - One source per normalized sender, so a message always resolves to one dedup scope and SMS plus paste counts as one. An SMS needs a source with channel `sms`. A paste can name any source, because a person chose it, and an unknown sender is still dropped.
+  - `applySplit` was extracted from `applyStructure` and takes the repositories of a running write, because calling a service's `atomic` from inside another would deadlock on the driver queue. Posting and splitting are one write. A refused automatic split leaves the income posted, flagged for the user, with the reason in the note.
+  - The first rule whose template fits decides, even when its amount then fails. Trying a looser rule on an amount its rule could not read would be a guess.
+  - A currency other than the rule account's sends the message to unmatched, because income and expense post in the account's currency. `{currency}` reads ASCII letters only, so a code with digits cannot come from the text.
+  - Thousands groups must be exactly 3 digits, so `1,00,000` is unreadable, and a leading `.50` is refused.
+  - A template needs `{amount}` once and at least 3 fixed characters, so no rule can match everything. Free fields need text after them; `{amount}`, `{balance}`, and `{currency}` do not, which reads `COP150,000`.
+  - Middle text uses `indexOf` from the current position, with no backtracking. The worst case is message length times template length, bounded by the caps of 2000 and 500 characters.
+  - The one-time code check runs only on messages no rule matched, following the brief. Purchase notices often carry an authorization code, and dropping them would lose real transactions. So a user's rule that fits a one-time code does store it.
+  - One-time detection errs towards privacy: a word such as `code` or `pin` next to 4 to 8 digits counts, so a real unmatched message of that shape is dropped.
+  - Dedup compares only the normalized body, not an amount: the body holds the amount, and comparing would make an edited item's replay look new. The body key is a 64-bit FNV-1a hash, since no crypto library is installed. Outside the window, a message with no reference counts as new even on a replay, because it cannot be told from a repeated purchase. Defaults: 24 hours for duplicates, 72 for transfers.
+  - Pairing needs the same two accounts mirrored. Across currencies amounts are free, so the oldest candidate wins. A side posted alone stays a candidate, so a late side joins that transfer. A deleted transfer stops being a candidate.
+  - A pair posts by itself only when both rules have `autoPost`; otherwise it waits for one approval. Rejecting one side, or editing it, returns the other to waiting.
+  - `inbox_items.transaction_id` is `ON DELETE SET NULL`, so `deleteTransaction` and `undoMove` keep working. A CHECK refuses a body on a resolved item.
+  - Resolved items are never purged, because they are what makes a replay inert. They keep extracted fields such as the counterparty, but no body.
+  - Building a rule from an item copies the message into the rule's samples, which outlive retention. T8 must keep samples out of shared rule packs or scrub them.
+  - The main tab's composition moved from split to `src/features/rules/ui/main-screen.tsx`, because rules depends on split. A failed purge at start does not block the app and runs again on the next start.
+- Known limit: two sides arriving outside the window can each be posted alone by the user, making two transfers. Each one is an explicit choice.
 
 ## Next step
 
-T4 Rules engine. Run the ledger and split screens on a device or emulator when a toolchain exists, including migration 002 over an existing database under `expo-sqlite`.
+T5 SMS capture, calling `rules.ingestMessage`, plus the Android share target. Run the ledger, split, and rules screens on a device or emulator when a toolchain exists, including migrations 002 and 003 over an existing database under `expo-sqlite`.
