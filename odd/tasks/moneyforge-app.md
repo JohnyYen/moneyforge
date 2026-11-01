@@ -240,6 +240,13 @@ T4.1 evidence:
   - Retention in hours may not be shorter than the transfer window.
   - An ingest failing after the secret was created keeps the secret, which holds nothing from the message. The two `atomic writes` tests ingest once first, so their snapshots stay exact.
 
+T4.1 review evidence:
+
+- review: medium, granted by the user. Native review found `R3-otp-auth-code-regression`, CRITICAL, introduced by removing `auth code` from the strong one-time-code words.
+- The one bounded correction `82faf63` was rejected by the targeted validator, because `Your authorization code for this payment is 482913` still passed. The lineage ended escalated with `native_stop_required`, so no approval or receipt exists for this candidate.
+- Follow-up outside the review lifecycle: an authorization code is exempt only with a purchase word and a separate amount. RED: 3 failed of 47. GREEN: `pnpm test`, 35 suites, 683 tests passed; typecheck and lint exit 0.
+- Environment: mise `node@latest` points at an empty 26.5.0 install, so commands use 26.4.0 explicitly.
+
 ## Next step
 
 T5 SMS capture, calling `rules.ingestMessage` over the one existing database connection, plus the Android share target. Run the ledger, split, and rules screens on a device or emulator when a toolchain exists, including migrations 002 and 003 over an existing database under `expo-sqlite`.

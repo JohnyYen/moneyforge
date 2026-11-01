@@ -76,12 +76,16 @@ const AUTHORIZATION_CODE =
   /\b(?:auth(?:orization)?|approval) codes?\b|\bc[oó]digos? de (?:autorizaci[oó]n|aprobaci[oó]n)\b/gi;
 const PURCHASE_CONTEXT =
   /\b(?:purchase|paid|payment|charged|approved|transaction|compra|pago|cargo|aprobad[ao]|transacci[oó]n)\b/i;
-const DO_NOT_SHARE = /\b(?:do not|don'?t|never) share\b|\bno (?:lo |la )?compart[ai]s?\b/i;
+const NUMBER = /[0-9]+(?:[.,][0-9]+)*/g;
+const DO_NOT_SHARE =/\b(?:do not|don'?t|never) share\b|\bno (?:lo |la )?compart[ai]s?\b/i;
 
 export function looksLikeOneTimeCode(body: string): boolean {
   const text = normalizeBody(body);
   if (ONE_TIME_WORDS.test(text) || BARE_CODE.test(text)) return true;
   if (DO_NOT_SHARE.test(text) && DIGIT_CODE.test(text)) return true;
-  const rest = PURCHASE_CONTEXT.test(text) ? text.replace(AUTHORIZATION_CODE, ' ') : text;
+  // A code alone is not a purchase notice: without a separate amount no rule could post it anyway,
+  // so failing toward privacy here loses nothing.
+  const isPurchaseNotice = PURCHASE_CONTEXT.test(text) && (text.match(NUMBER) ?? []).length >= 2;
+  const rest = isPurchaseNotice ? text.replace(AUTHORIZATION_CODE, ' ') : text;
   return CODE_WORDS.test(rest) && DIGIT_CODE.test(rest);
 }
