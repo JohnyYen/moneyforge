@@ -39,13 +39,14 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 - License: GPL-3.0-or-later, so forks stay open.
 - Architecture: screaming and hexagonal, under `src/features/<feature>/{domain,application,infrastructure,ui}`. Routes in `app/` stay thin.
 - Persistence: handwritten SQL migrations behind a small `SqlDriver` port, with `expo-sqlite` in production and `node:sqlite` in tests, so the same SQL is exercised by Jest.
+- Tooling: pnpm 11 ignores `node-linker` in `.npmrc`, so `nodeLinker: hoisted` lives in `pnpm-workspace.yaml`. Build scripts for `@parcel/watcher` and `unrs-resolver` are denied through `allowBuilds` because both ship prebuilt binaries. The `lint` script calls `eslint .` directly with the Expo config.
 - Delivery strategy: `exception-ok`. This is a greenfield repository with no remote, built as ordered work-unit commits on one feature branch; the forecast is above 400 authored lines per task, and PR slicing is decided when a remote exists. Each task below is a natural slice boundary.
 
 ## Tasks
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-- [ ] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README.
+- [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [ ] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens.
 - [ ] T3 Income split: structures, percentages, pending move tasks, screens.
 - [ ] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste and share input.
@@ -68,8 +69,20 @@ Test-first with Jest for domain and application behavior. UI screens use `tsc` a
 
 ## Progress
 
-Nothing implemented yet. Engram mirror pending: `mem_save` failed earlier this session because the host session registration could not be confirmed.
+T1 done. Route: delegated direct; the scaffold touched 2+ non-trivial files.
+
+T1 evidence:
+
+- RED: `pnpm test --testPathPatterns result` failed with `Cannot find module './result'`. GREEN: after adding `src/shared/result.ts`, the suite passes.
+- `pnpm test`: 3 suites, 8 tests passed, including an in-memory `node:sqlite` test.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `pnpm expo export --platform android`: exit 0, one 2.5 MB Hermes bundle.
+- Pending: no Gradle build or device run yet, so runtime behavior on Android is unproven.
+- Open: `pnpm lint` timed out twice during T1 and could not be reproduced once dependencies settled. Cause not established.
+
+Engram mirror pending: `mem_save` failed earlier this session because the host session registration could not be confirmed.
 
 ## Next step
 
-T1.
+T2.
