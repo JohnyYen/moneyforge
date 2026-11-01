@@ -46,8 +46,10 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
+Review base for the next candidate: `5f370f1`.
+
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
-- [ ] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens.
+- [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
 - [ ] T3 Income split: structures, percentages, pending move tasks, screens.
 - [ ] T4 Rules engine: sources, rule templates with test samples, inbox, dedup, own-transfer pairing, per-rule split mode, paste and share input.
 - [ ] T5 SMS capture: Kotlin Expo module, config plugin, two variants, opt-in screen. Depends on an Android toolchain for build proof.
@@ -80,9 +82,25 @@ T1 evidence:
 - `pnpm expo export --platform android`: exit 0, one 2.5 MB Hermes bundle.
 - Pending: no Gradle build or device run yet, so runtime behavior on Android is unproven.
 - Open: `pnpm lint` timed out twice during T1 and could not be reproduced once dependencies settled. Cause not established.
+- review: medium, declined by the user for this candidate; spot check pnpm test passed 8/8.
+
+T2 done. Route: delegated direct; 2+ non-trivial files.
+
+T2 evidence:
+
+- RED: domain and persistence suites failed with `Cannot find module` (8 failed, the 3 T1 suites passed); the application suite failed on `./ledger-service`; the UI helper suites failed on `./entry-date` and `./transaction-row-model`.
+- GREEN: `pnpm test`: 14 suites, 140 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `pnpm expo export --platform android`: exit 0, one 2.8 MB Hermes bundle.
+- Tests cover balancing per currency for transfer, conversion, fee, and adjustment; the 18-decimal round trip; rejection of unbalanced entries in the domain and at the write boundary; atomic rollback on a failed posting and on a failed later step.
+- Not run: no device run, Gradle build, or screen rendering test (no render test library is installed). `expo-sqlite` adapter and every screen are compiled, never executed; first run on a device is unproven.
+- Decisions: net worth leaves archived accounts out and reports currencies with no rate as missing. Rate lookup is direct or inverse only, with no triangulation. A conversion fee is added to the amount sent when in the source currency, and deducted from the amount received when in the target currency. Editing and deleting recorded transactions is out of T2 scope.
+- `expo-sqlite` transactions use one queued connection, because `withExclusiveTransactionAsync` opens a second connection without `PRAGMA foreign_keys`.
+- Run Jest with stdin from `/dev/null` in this environment: a piped run with open stdin hung past 200 seconds once.
 
 Engram mirror pending: `mem_save` failed earlier this session because the host session registration could not be confirmed.
 
 ## Next step
 
-T2.
+Run the T2 ledger on a device or emulator when a toolchain exists, then T3.
