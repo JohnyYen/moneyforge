@@ -87,6 +87,20 @@ A split records a plan for an income and lists the moves to make. It never moves
 - Editing the amount, account, or kind of a split income, or deleting it, is refused while a move is done. With no move done, it cancels the split once you confirm. Deleting a linked transfer returns its move to pending.
 - A default structure per income category or account is proposed when you record income. The category wins.
 
+## Message rules
+
+Bank messages become transactions through rules you write. Everything starts with `ingestMessage({ channel, sender, body, receivedAt })`, which both the paste screen and SMS capture call.
+
+- A source is a sender you trust, matched exactly after ignoring case, spaces, and dashes. A message from anyone else is discarded before anything is written. An SMS needs a source that accepts SMS. A paste can name any source, so the same message by SMS and by paste counts as one.
+- Rules use safe templates, never regular expressions, so an imported rule cannot hang the app: `You received {amount} {currency} from {counterparty}. Ref {reference}`. Placeholders are `{amount}`, `{currency}`, `{reference}`, `{counterparty}`, `{balance}`, and `{*}`. Matching walks the message once and never backtracks, and a message over 2000 characters is never matched. Write a literal brace as `{{` or `}}`.
+- Each rule has a number format, so `1.500,25` and `1,500.25` become the same exact amount. An amount the format cannot read, or a currency other than the account's, sends the message to the inbox as unmatched. Nothing is guessed, and a lower-priority rule does not get a second try.
+- The highest priority wins among rules that fit, and ties go to the lowest id.
+- A message with no rule stays in the inbox so you can build a rule from it, unless it looks like a one-time code. Those are not stored in any form, not even as a hash. A message that a rule matches is kept even if it contains a code, because bank notices often carry one.
+- A message's text is erased as soon as it is posted or rejected. Unresolved messages are purged after 30 days, on app start. Only a hash and the reference stay, so a replay creates nothing.
+- Dedup uses one key per source and reference. With no reference, the same normalized text within the duplicate window counts as a copy. The same text after the window is a new movement.
+- A `transfer_out` and a `transfer_in` between the same two accounts become one movement: one transfer when the amounts match in one currency, and one conversion with both amounts when the currencies differ. They can arrive in either order, from one source or two. A side with no pair waits and posts nothing, and it surfaces after the transfer window. If you post it alone, a side arriving later joins that transfer instead of adding another.
+- Posting builds the entry through the ledger's own validation, in one write with any split. `splitMode` `auto` applies the structure, and if it can no longer apply, the income stays recorded and the split is offered instead. `ask` offers it in the inbox. `none` does nothing.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).

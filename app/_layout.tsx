@@ -29,6 +29,15 @@ export default function RootLayout() {
             <Stack.Screen name="split/apply/[transactionId]" options={{ title: 'Split income' }} />
             <Stack.Screen name="split/moves/index" options={{ title: 'Pending moves' }} />
             <Stack.Screen name="split/moves/[id]" options={{ title: 'Move' }} />
+            <Stack.Screen name="inbox/index" options={{ title: 'Inbox' }} />
+            <Stack.Screen name="inbox/paste" options={{ title: 'Paste a message' }} />
+            <Stack.Screen name="inbox/[id]" options={{ title: 'Review message' }} />
+            <Stack.Screen name="rules/index" options={{ title: 'Messages and rules' }} />
+            <Stack.Screen name="rules/settings" options={{ title: 'Message settings' }} />
+            <Stack.Screen name="rules/new" options={{ title: 'New rule' }} />
+            <Stack.Screen name="rules/[id]" options={{ title: 'Edit rule' }} />
+            <Stack.Screen name="rules/sources/new" options={{ title: 'New source' }} />
+            <Stack.Screen name="rules/sources/[id]" options={{ title: 'Edit source' }} />
           </Stack>
         </SetupGate>
       </AppServicesProvider>

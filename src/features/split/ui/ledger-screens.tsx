@@ -2,7 +2,6 @@ import { useRouter } from 'expo-router';
 import { useCallback } from 'react';
 
 import type { Transaction } from '@/features/ledger/domain/journal';
-import { AccountsScreen } from '@/features/ledger/ui/accounts/accounts-screen';
 import { AddTransactionScreen } from '@/features/ledger/ui/transactions/add-transaction-screen';
 import { TransactionDetailScreen } from '@/features/ledger/ui/transactions/transaction-detail-screen';
 import { leaveScreen } from '@/shared/ui/leave-screen';
@@ -14,7 +13,7 @@ import { pendingMovesLabel } from './split-model';
 import { TransactionSplitSection } from './transaction-split-section';
 
 /** Ledger screens with the split features plugged in, so the ledger never imports them. */
-function PendingMovesLink() {
+export function PendingMovesLink() {
   const split = useSplit();
   const router = useRouter();
   const load = useCallback(() => split.countPendingMoves(), [split]);
@@ -24,10 +23,6 @@ function PendingMovesLink() {
   return (
     <ListRow title={pendingMovesLabel(state.data)} onPress={() => router.push('/split/moves')} />
   );
-}
-
-export function MainScreen() {
-  return <AccountsScreen header={<PendingMovesLink />} />;
 }
 
 export function NewTransactionScreen() {

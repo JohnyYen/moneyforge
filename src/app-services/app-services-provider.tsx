@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
 import { LedgerContext } from '@/features/ledger/ui/ledger-context';
+import { RulesContext } from '@/features/rules/ui/rules-context';
 import { SplitContext } from '@/features/split/ui/split-context';
 import { FailureState, LoadingState } from '@/shared/ui/primitives';
 import { messageOf } from '@/shared/ui/use-focus-query';
@@ -46,7 +47,9 @@ export function AppServicesProvider({ children }: { children: ReactNode }) {
   }
   return (
     <LedgerContext.Provider value={state.services.ledger}>
-      <SplitContext.Provider value={state.services.split}>{children}</SplitContext.Provider>
+      <SplitContext.Provider value={state.services.split}>
+        <RulesContext.Provider value={state.services.rules}>{children}</RulesContext.Provider>
+      </SplitContext.Provider>
     </LedgerContext.Provider>
   );
 }

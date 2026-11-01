@@ -1,1 +1,1 @@
-export { MainScreen as default } from '@/features/split/ui/ledger-screens';
+export { MainScreen as default } from '@/features/rules/ui/main-screen';

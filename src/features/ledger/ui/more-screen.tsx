@@ -6,6 +6,8 @@ export function MoreScreen() {
   const router = useRouter();
   return (
     <Screen>
+      <ListRow title="Inbox" onPress={() => router.push('/inbox')} />
+      <ListRow title="Messages and rules" onPress={() => router.push('/rules')} />
       <ListRow title="Income split" onPress={() => router.push('/split')} />
       <ListRow title="Categories" onPress={() => router.push('/categories')} />
       <ListRow title="Currencies" onPress={() => router.push('/currencies')} />
