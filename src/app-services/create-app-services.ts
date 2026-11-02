@@ -12,6 +12,12 @@ import {
   createMessageCapture,
   type MessageCapturePort,
 } from '@/features/rules/application/message-capture';
+import { createOnChainService } from '@/features/onchain/application/onchain-service';
+import {
+  absentOnChainClient,
+  type OnChainClient,
+} from '@/features/onchain/application/ports';
+import { createSqliteOnChainStore } from '@/features/onchain/infrastructure/sqlite-onchain-store';
 import type { ExpectedCashFlowSource } from '@/features/planning/application/ports';
 import { createPlanningService } from '@/features/planning/application/planning-service';
 import {
@@ -62,6 +68,7 @@ export function createAppServices(deps: {
   readonly generateId: IdGenerator;
   readonly generateSecret: SecretGenerator;
   readonly messageCapture?: MessageCapturePort;
+  readonly onChainClient?: OnChainClient;
   readonly expectedSources?: readonly ExpectedCashFlowSource[];
 }) {
   const { driver, clock, generateId, generateSecret } = deps;
@@ -94,6 +101,12 @@ export function createAppServices(deps: {
     assets,
     rules,
     capture,
+    onchain: createOnChainService({
+      store: createSqliteOnChainStore(driver),
+      clock,
+      generateId,
+      client: deps.onChainClient ?? absentOnChainClient,
+    }),
   };
 }
 

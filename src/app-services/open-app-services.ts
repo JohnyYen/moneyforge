@@ -1,3 +1,4 @@
+import { createFetchOnChainClient } from '@/features/onchain/infrastructure/fetch-onchain-client';
 import {
   androidSmsPermissions,
   createNativeMessageCapture,
@@ -22,6 +23,7 @@ export async function openAppServices(): Promise<AppServices> {
     generateId,
     generateSecret,
     messageCapture: createNativeMessageCapture(MessageCapture, androidSmsPermissions),
+    onChainClient: createFetchOnChainClient(),
   });
   await services.ledger.initialize();
   // Retried on the next start: a failed cleanup must not keep the user out of their ledger.
