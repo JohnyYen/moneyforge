@@ -151,17 +151,19 @@ export function rankRules(rules: readonly Rule[]): Rule[] {
 export type RuleSelection = { readonly rule: Rule; readonly evaluation: RuleEvaluation };
 
 /**
- * The first rule whose shape fits decides, even when it then fails: trying a looser rule on
- * an amount its rule could not read would be a guess at what the amount means.
+ * The first rule that works decides, so a failing rule never hides a working one, wherever it came
+ * from. With none, the first failure is kept, because that is what a person should see.
  */
 export function selectRule(
   rules: readonly Rule[],
   text: string,
   lookups: RuleLookups,
 ): RuleSelection | null {
+  let failure: RuleSelection | null = null;
   for (const rule of rankRules(rules)) {
     const evaluation = evaluateRule(rule, text, lookups);
-    if (evaluation.status !== 'no-match') return { rule, evaluation };
+    if (evaluation.status === 'matched') return { rule, evaluation };
+    if (evaluation.status === 'failed') failure ??= { rule, evaluation };
   }
-  return null;
+  return failure;
 }

@@ -106,6 +106,7 @@ describe('rule packs', () => {
       ['Savings', savings],
     ]),
     categories: new Map([['Income', category]]),
+    enabledSenders: new Set<string>(),
     ...change,
   });
 
@@ -123,7 +124,16 @@ describe('rule packs', () => {
         categories: [{ name: 'Income', kind: 'income' }],
       });
       expect(preview.sources).toEqual([
-        { name: 'Example bank', sender: 'example', isNew: true, newRules: 2, knownRules: 0 },
+        {
+          name: 'Example bank',
+          sender: 'example',
+          isNew: true,
+          rules: [
+            { name: 'Pay', priority: 5, template: 'Received {amount} from {counterparty}.' },
+            { name: 'Move', priority: 0, template: 'Sent {amount} to savings' },
+          ],
+          knownRules: 0,
+        },
       ]);
       expect(await snapshot()).toBe(before);
     });
@@ -141,6 +151,7 @@ describe('rule packs', () => {
     it('never auto-posts, and asks about a split on income', async () => {
       expect(unwrap(await services.rules.importRulePack(mapping()))).toEqual({
         sources: 1,
+        enabled: 0,
         rules: 2,
         skipped: 0,
       });
@@ -160,7 +171,9 @@ describe('rule packs', () => {
     });
 
     it('posts nothing by itself from a message an imported rule matches', async () => {
-      unwrap(await services.rules.importRulePack(mapping()));
+      unwrap(
+        await services.rules.importRulePack(mapping({ enabledSenders: new Set(['example']) })),
+      );
       const result = await services.rules.ingestMessage({
         channel: 'sms',
         sender: 'EXAMPLE',
@@ -175,10 +188,11 @@ describe('rule packs', () => {
       unwrap(await services.rules.importRulePack(mapping()));
       const before = await snapshot();
       expect(unwrap(await services.rules.previewRulePack(PACK)).sources).toEqual([
-        { name: 'Example bank', sender: 'example', isNew: false, newRules: 0, knownRules: 2 },
+        { name: 'Example bank', sender: 'example', isNew: false, rules: [], knownRules: 2 },
       ]);
       expect(unwrap(await services.rules.importRulePack(mapping()))).toEqual({
         sources: 0,
+        enabled: 0,
         rules: 0,
         skipped: 2,
       });
@@ -236,11 +250,101 @@ describe('rule packs', () => {
       expect(await allRules()).toHaveLength(2);
     });
 
-    it('tells capture about new senders once the write is done', async () => {
+    it('tells capture about a sender only once it is on and the write is done', async () => {
       unwrap(await services.rules.importRulePack(mapping()));
+      expect(announced).toBe(0);
+      const on = mapping({ text: PACK.replace('EXAMPLE', 'OTHER'), enabledSenders: new Set(['other']) });
+      unwrap(await services.rules.importRulePack(on));
       expect(announced).toBe(1);
-      unwrap(await services.rules.importRulePack(mapping()));
+      unwrap(await services.rules.importRulePack(on));
       expect(announced).toBe(1);
+    });
+
+    describe('a new source', () => {
+      const message = {
+        channel: 'sms',
+        sender: 'EXAMPLE',
+        body: 'Received 10.00 from Someone.',
+        receivedAt: '2026-03-10T12:00:00.000Z',
+      } as const;
+
+      it('starts off, so its sender stores nothing', async () => {
+        const report = unwrap(await services.rules.importRulePack(mapping()));
+        expect(report.enabled).toBe(0);
+        await expect(services.rules.listSources()).resolves.toMatchObject([{ enabled: false }]);
+        await expect(services.rules.ingestMessage(message)).resolves.toEqual({ outcome: 'dropped' });
+      });
+
+      it('turns on only the senders chosen one by one', async () => {
+        const text = PACK.replace(
+          '"sources":[',
+          `"sources":[{"name":"Chat","channel":"sms","sender":"WhatsApp","rules":[]},`,
+        );
+        const report = unwrap(
+          await services.rules.importRulePack(
+            mapping({ text, enabledSenders: new Set(['example']) }),
+          ),
+        );
+        expect(report).toMatchObject({ sources: 2, enabled: 1 });
+        const sources = await services.rules.listSources();
+        expect(sources.find(({ sender }) => sender === 'example')?.enabled).toBe(true);
+        expect(sources.find(({ sender }) => sender === 'whatsapp')?.enabled).toBe(false);
+      });
+    });
+
+    describe('on a source that already has rules', () => {
+      const mine = async (priority: number) => {
+        const source = unwrap(
+          await services.rules.createSource({
+            name: 'Mine',
+            channel: 'sms',
+            sender: 'EXAMPLE',
+            enabled: true,
+          }),
+        );
+        return unwrap(
+          await services.rules.createRule({
+            sourceId: source.id,
+            name: 'Mine',
+            priority,
+            template: 'Received {amount} from {*}',
+            format: { decimal: '.', thousands: ',' },
+            kind: 'income',
+            accountId: savings,
+            categoryId: null,
+            counterpartAccountId: null,
+            currencyCode: null,
+            autoPost: false,
+            splitMode: 'none',
+            splitStructureId: null,
+            samples: [],
+          }),
+        );
+      };
+
+      it('places pack rules below the lowest, in their order, as the preview said', async () => {
+        await mine(3);
+        const [source] = unwrap(await services.rules.previewRulePack(PACK)).sources;
+        expect(source.rules.map(({ priority }) => priority)).toEqual([2, -3]);
+        unwrap(await services.rules.importRulePack(mapping()));
+        const priorities = (await allRules()).map(({ name, priority }) => [name, priority]);
+        expect(priorities).toEqual(
+          expect.arrayContaining([['Mine', 3], ['Pay', 2], ['Move', -3]]),
+        );
+      });
+
+      it('keeps the existing rule deciding a message both could read', async () => {
+        const rule = await mine(0);
+        unwrap(await services.rules.importRulePack(mapping()));
+        await services.rules.ingestMessage({
+          channel: 'sms',
+          sender: 'EXAMPLE',
+          body: 'Received 10.00 from Someone.',
+          receivedAt: '2026-03-10T12:00:00.000Z',
+        });
+        const [item] = await driver.all<{ rule_id: string }>('SELECT rule_id FROM inbox_items');
+        expect(item.rule_id).toBe(rule.id);
+      });
     });
   });
 
@@ -313,9 +417,10 @@ describe('rule packs', () => {
             text,
             accounts: new Map([['Account 1', main]]),
             categories: new Map([['Income category 1', category]]),
+            enabledSenders: new Set(),
           }),
         ),
-      ).toEqual({ sources: 0, rules: 0, skipped: 1 });
+      ).toEqual({ sources: 0, enabled: 0, rules: 0, skipped: 1 });
     });
 
     it('refuses an unknown source', async () => {

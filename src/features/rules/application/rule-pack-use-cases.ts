@@ -2,11 +2,13 @@ import { err, ok, type Result } from '@/shared/result';
 
 import {
   buildRulePack,
+  packPriorityShift,
   packRuleKey,
   packSlots,
   parseRulePack,
   type PackRule,
   type PackSlots,
+  type PackSource,
   type RulePack,
 } from '../domain/rule-pack';
 import type { Rule } from '../domain/rule';
@@ -15,11 +17,14 @@ import type { MessageSource } from '../domain/source';
 import type { RuleDeps, RuleRepositories } from './ports';
 import { writeRule, writeSource } from './rule-use-cases';
 
+export type PackRulePreview = Pick<PackRule, 'name' | 'priority' | 'template'>;
+
 export type PackSourcePreview = {
   readonly name: string;
   readonly sender: string;
   readonly isNew: boolean;
-  readonly newRules: number;
+  /** What importing adds, at the priority it would get. */
+  readonly rules: readonly PackRulePreview[];
   readonly knownRules: number;
 };
 
@@ -36,10 +41,13 @@ export type PackImportInput = {
   readonly accounts: ReadonlyMap<string, string>;
   /** A slot left out gives its rules no category. */
   readonly categories: ReadonlyMap<string, string>;
+  /** Normalized senders to turn on. Any other new source stays off, so it stores nothing. */
+  readonly enabledSenders: ReadonlySet<string>;
 };
 
 export type PackReport = {
   readonly sources: number;
+  readonly enabled: number;
   readonly rules: number;
   readonly skipped: number;
 };
@@ -80,9 +88,23 @@ const toRule = (rule: PackRule, id: string, sourceId: string, input: PackImportI
   samples: [],
 });
 
-async function knownKeys({ rules }: RuleRepositories, source: MessageSource | null) {
+/** Shared by preview and import, so what is shown is what gets written. */
+async function incomingRules(
+  { rules }: RuleRepositories,
+  source: MessageSource | null,
+  packed: PackSource,
+) {
   const stored = source ? await rules.listRules(source.id) : [];
-  return new Set(stored.map(packRuleKey));
+  const known = new Set(stored.map(packRuleKey));
+  const fresh = packed.rules.filter((rule) => !known.has(packRuleKey(rule)));
+  const shift = packPriorityShift(
+    fresh.map(({ priority }) => priority),
+    stored.map(({ priority }) => priority),
+  );
+  return {
+    fresh: fresh.map((rule) => ({ ...rule, priority: rule.priority + shift })),
+    knownRules: packed.rules.length - fresh.length,
+  };
 }
 
 export function createRulePackUseCases({ store, generateId, onSourcesChanged }: RuleDeps) {
@@ -91,22 +113,23 @@ export function createRulePackUseCases({ store, generateId, onSourcesChanged }: 
     pack: RulePack,
     input: PackImportInput,
   ): Promise<PackReport> {
-    const report = { sources: 0, rules: 0, skipped: 0 };
+    const report = { sources: 0, enabled: 0, rules: 0, skipped: 0 };
     for (const packed of pack.sources) {
       const { name, channel, sender } = packed;
       const existing = await repositories.rules.findSourceBySender(sender);
+      const enabled = input.enabledSenders.has(sender);
       const source =
         existing ??
         unwritten(
-          await writeSource(repositories, { id: generateId(), name, channel, sender, enabled: true }),
+          await writeSource(repositories, { id: generateId(), name, channel, sender, enabled }),
         );
-      if (!existing) report.sources += 1;
-      const known = await knownKeys(repositories, existing);
-      for (const rule of packed.rules) {
-        if (known.has(packRuleKey(rule))) {
-          report.skipped += 1;
-          continue;
-        }
+      if (!existing) {
+        report.sources += 1;
+        if (enabled) report.enabled += 1;
+      }
+      const { fresh, knownRules } = await incomingRules(repositories, existing, packed);
+      report.skipped += knownRules;
+      for (const rule of fresh) {
         unwritten(
           await writeRule(repositories, toRule(rule, generateId(), source.id, input), null),
         );
@@ -143,15 +166,19 @@ export function createRulePackUseCases({ store, generateId, onSourcesChanged }: 
       const pack = parseRulePack(text);
       if (!pack.ok) return pack;
       const sources: PackSourcePreview[] = [];
-      for (const { name, sender, rules } of pack.value.sources) {
+      for (const packed of pack.value.sources) {
+        const { name, sender } = packed;
         const existing = await store.rules.findSourceBySender(sender);
-        const known = await knownKeys(store, existing);
-        const knownRules = rules.filter((rule) => known.has(packRuleKey(rule))).length;
+        const { fresh, knownRules } = await incomingRules(store, existing, packed);
         sources.push({
           name,
           sender,
           isNew: !existing,
-          newRules: rules.length - knownRules,
+          rules: fresh.map(({ name: title, priority, template }) => ({
+            name: title,
+            priority,
+            template,
+          })),
           knownRules,
         });
       }
@@ -175,7 +202,7 @@ export function createRulePackUseCases({ store, generateId, onSourcesChanged }: 
         const report = await store.atomic((repositories) =>
           writePack(repositories, pack.value, input),
         );
-        if (report.sources > 0) await onSourcesChanged?.();
+        if (report.enabled > 0) await onSourcesChanged?.();
         return ok(report);
       } catch (error) {
         if (error instanceof PackRefused) return err(error.error);

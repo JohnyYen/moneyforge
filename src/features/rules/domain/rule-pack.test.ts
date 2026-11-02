@@ -5,6 +5,7 @@ import {
   MAX_PACK_CHARS,
   MAX_PACK_RULES,
   MAX_PACK_SOURCES,
+  packPriorityShift,
   packSlots,
   parseRulePack,
   type RulePack,
@@ -79,7 +80,7 @@ describe('parseRulePack', () => {
     ['sources that are not a list', pack({ sources: {} })],
     ['too many sources', pack({
       sources: Array.from({ length: MAX_PACK_SOURCES + 1 }, (_, index) =>
-        source({ sender: `S${index}` })),
+        source({ sender: `SENDER${index}` })),
     })],
     ['too many rules', pack({
       sources: [source({
@@ -105,6 +106,30 @@ describe('parseRulePack', () => {
     })],
   ])('refuses the unknown field in %s', (_, value) => {
     expect(parse(value)).toMatchObject(refused);
+  });
+
+  it.each([
+    ['a line separator', 0x2028],
+    ['a paragraph separator', 0x2029],
+    ['a next line', 0x85],
+    ['a right to left mark', 0x200f],
+    ['a left to right mark', 0x200e],
+    ['an Arabic letter mark', 0x061c],
+    ['a direction override', 0x202e],
+    ['a direction isolate', 0x2067],
+  ])('refuses %s in a name, a sender, and a template', (_, code) => {
+    const mark = String.fromCharCode(code);
+    expect(parse(pack({ name: `a${mark}b` }))).toMatchObject(refused);
+    expect(parse(pack({ sources: [source({ sender: `BAN${mark}K` })] }))).toMatchObject(refused);
+    expect(parse(pack({
+      sources: [source({ rules: [rule({ template: `Paid {amount} at${mark} home` })] })],
+    }))).toMatchObject(refused);
+  });
+
+  it('refuses a line break in a template, which would hide text in a preview', () => {
+    expect(parse(pack({
+      sources: [source({ rules: [rule({ template: 'Paid {amount}\nmore text' })] })],
+    }))).toMatchObject(refused);
   });
 
   it('refuses a __proto__ key instead of merging it', () => {
@@ -136,8 +161,10 @@ describe('parseRulePack', () => {
     ['an account that is not a slot name', withRule({ account: 7 })],
     ['a channel it does not know', pack({ sources: [source({ channel: 'email' })] })],
     ['an empty sender', pack({ sources: [source({ sender: ' - ' })] })],
+    ['a two character sender', pack({ sources: [source({ sender: 'AB' })] })],
+    ['a sender short once normalized', pack({ sources: [source({ sender: 'A - B' })] })],
     ['the same sender twice', pack({
-      sources: [source({ sender: 'A-B' }), source({ sender: 'ab' })],
+      sources: [source({ sender: 'A-B-C' }), source({ sender: 'abc' })],
     })],
     ['the same rule twice', pack({ sources: [source({ rules: [rule(), rule()] })] })],
     ['a category slot of both kinds', pack({
@@ -147,6 +174,23 @@ describe('parseRulePack', () => {
     })],
   ])('refuses %s', (_, value) => {
     expect(parse(value)).toMatchObject(refused);
+  });
+});
+
+describe('packPriorityShift', () => {
+  it('moves new rules below the lowest stored one, keeping their order', () => {
+    expect(packPriorityShift([5, 0], [3, 7])).toBe(-3);
+  });
+
+  it('leaves rules that are already lower, and a source with no rules', () => {
+    expect(packPriorityShift([1, 0], [3])).toBe(0);
+    expect(packPriorityShift([2], [3])).toBe(0);
+    expect(packPriorityShift([9], [])).toBe(0);
+    expect(packPriorityShift([], [3])).toBe(0);
+  });
+
+  it('counts a tie as taking over', () => {
+    expect(packPriorityShift([3], [3])).toBe(-1);
   });
 });
 

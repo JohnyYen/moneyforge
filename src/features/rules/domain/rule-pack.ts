@@ -16,6 +16,8 @@ const MAX_PACK_SLOTS = 50;
 const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 500;
 const MAX_PRIORITY = 1_000_000;
+/** A shorter sender is one a person could share with a contact, or a whole app. */
+const MIN_SENDER_LENGTH = 3;
 
 /** `account`, `category`, and `counterpart` name slots, which a person maps on import. */
 export type PackRule = {
@@ -70,12 +72,20 @@ function record(value: unknown, allowed: readonly string[], where: string) {
   return ok(new Map(Object.entries(value)));
 }
 
-/** Line breaks and direction overrides could make a preview read as something else. */
+const CONTROL_CHARACTERS = [
+  [0x00, 0x1f],
+  [0x7f, 0x9f], // Delete and the C1 controls, with U+0085 next line.
+  [0x061c, 0x061c], // Arabic letter mark.
+  [0x200e, 0x200f], // Direction marks.
+  [0x2028, 0x202e], // Line and paragraph separators, then direction embeddings and overrides.
+  [0x2066, 0x2069], // Direction isolates.
+] as const;
+
+/** Line breaks and direction controls could make a preview read as something else. */
 function hasControlCharacter(text: string): boolean {
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
-    const override = (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069);
-    if (code < 0x20 || code === 0x7f || override) return true;
+    if (CONTROL_CHARACTERS.some(([low, high]) => code >= low && code <= high)) return true;
   }
   return false;
 }
@@ -123,6 +133,7 @@ function parseRule(value: unknown, where: string): Checked<PackRule> {
   if (Math.abs(priority) > MAX_PRIORITY) return invalid(`${where} priority is out of range.`);
   const template = get('template');
   if (typeof template !== 'string') return invalid(`${where} template must be text.`);
+  if (hasControlCharacter(template)) return invalid(`${where} template has a control character.`);
   const format = parseFormat(get('format'), where);
   if (!format.ok) return format;
   const kind = RULE_KINDS.find((known) => known === get('kind'));
@@ -170,6 +181,18 @@ export const packRuleKey = ({ template, kind, format }: {
   readonly format: NumberFormat;
 }) => [kind, format.decimal, format.thousands, template].join('\0');
 
+/**
+ * How far to lower new rules, as one group so their order holds. A pack never outranks a rule a
+ * source already has, since priority alone decides which rule reads a message.
+ */
+export function packPriorityShift(
+  incoming: readonly number[],
+  existing: readonly number[],
+): number {
+  if (incoming.length === 0 || existing.length === 0) return 0;
+  return Math.min(Math.min(...existing) - 1 - Math.max(...incoming), 0);
+}
+
 function parseSource(value: unknown, where: string): Checked<PackSource> {
   const fields = record(value, ['name', 'channel', 'sender', 'rules'], where);
   if (!fields.ok) return fields;
@@ -181,6 +204,9 @@ function parseSource(value: unknown, where: string): Checked<PackSource> {
   if (!senderText.ok) return senderText;
   const sender = normalizeSender(senderText.value);
   if (!sender) return invalid(`${where} sender is empty.`);
+  if (sender.length < MIN_SENDER_LENGTH) {
+    return invalid(`${where} sender needs at least ${MIN_SENDER_LENGTH} characters.`);
+  }
   const list = fields.value.get('rules');
   if (!Array.isArray(list)) return invalid(`${where} rules must be a list.`);
   if (list.length > MAX_PACK_RULES) return invalid(`A pack can hold ${MAX_PACK_RULES} rules.`);

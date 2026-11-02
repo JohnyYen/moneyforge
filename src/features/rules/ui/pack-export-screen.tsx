@@ -39,9 +39,9 @@ export function PackExportScreen() {
       {(sources) => (
         <Screen>
           <Notice>
-            A pack holds sender names and templates. It leaves out samples, inbox items, and your
-            accounts and categories. Read your templates first: fixed text in one stays in the pack,
-            so replace names and numbers with placeholders.
+            A pack holds senders, source and rule names, and templates. It leaves out samples, inbox
+            items, and your accounts and categories. Read all of them first: a name or fixed text in
+            a template stays in the pack as you wrote it, so replace personal names and numbers.
           </Notice>
           {sources.length === 0 ? <EmptyState title="No sources to export" /> : null}
           <TextField label="Pack name" value={name} onChangeText={setName} />

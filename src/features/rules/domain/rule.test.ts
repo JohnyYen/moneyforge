@@ -144,14 +144,23 @@ describe('selectRule', () => {
     });
   });
 
-  it('does not fall through to a looser rule when the winner cannot read the amount', () => {
-    const strict = rule({
-      id: 'strict',
-      priority: 9,
-      template: 'Got {amount} USD',
-      format: { decimal: ',', thousands: '.' },
-    });
+  const strict = rule({
+    id: 'strict',
+    priority: 9,
+    template: 'Got {amount} USD',
+    format: { decimal: ',', thousands: '.' },
+  });
+
+  it('keeps trying after a fitting rule fails, so a failure hides no working rule', () => {
     expect(selectRule([strict, low], 'Got 1,500.25 USD', lookups)).toMatchObject({
+      rule: { id: 'low' },
+      evaluation: { status: 'matched' },
+    });
+  });
+
+  it('reports the first failure when no rule works', () => {
+    const lower = rule({ ...strict, id: 'lower', priority: 1 });
+    expect(selectRule([lower, strict], 'Got 1,500.25 USD', lookups)).toMatchObject({
       rule: { id: 'strict' },
       evaluation: { status: 'failed' },
     });

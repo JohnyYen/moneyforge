@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { Fragment, useCallback, useState } from 'react';
 
 import { useLedger } from '@/features/ledger/ui/ledger-context';
 import {
@@ -39,19 +39,23 @@ export function PackImportScreen() {
   const [preview, setPreview] = useState<PackPreview | null>(null);
   const [accounts, setAccounts] = useState<ReadonlyMap<string, string>>(new Map());
   const [categories, setCategories] = useState<ReadonlyMap<string, string>>(new Map());
+  const [enabledSenders, setEnabledSenders] = useState<ReadonlySet<string>>(new Set());
   const [report, setReport] = useState<string | null>(null);
 
   const check = useSubmit((pack: string) => rules.previewRulePack(pack), (value) => {
     setPreview(value);
     setAccounts(new Map());
     setCategories(new Map());
+    setEnabledSenders(new Set());
     setReport(null);
   });
   const commit = useSubmit(
-    () => rules.importRulePack({ text, accounts, categories }),
+    () => rules.importRulePack({ text, accounts, categories, enabledSenders }),
     (done) => {
       setPreview(null);
-      setReport(`Added ${done.sources} sources and ${done.rules} rules. Skipped ${done.skipped}.`);
+      setReport(
+        `Added ${done.sources} sources, ${done.enabled} on, and ${done.rules} rules. Skipped ${done.skipped}.`,
+      );
     },
   );
 
@@ -62,6 +66,11 @@ export function PackImportScreen() {
   };
   const withSlot = (map: ReadonlyMap<string, string>, slot: string, id: string) =>
     new Map(map).set(slot, id);
+  const toggle = (sender: string) => {
+    const next = new Set(enabledSenders);
+    if (!next.delete(sender)) next.add(sender);
+    setEnabledSenders(next);
+  };
 
   return (
     <QueryBoundary state={state} onRetry={reload}>
@@ -84,14 +93,22 @@ export function PackImportScreen() {
             <>
               <SectionLabel>{preview.name}</SectionLabel>
               {preview.description ? <Muted>{preview.description}</Muted> : null}
-              <Muted>Messages from these senders will be saved once you confirm.</Muted>
-              {preview.sources.map(({ name, sender, isNew, newRules, knownRules }) => (
-                <ListRow
-                  key={sender}
-                  title={name}
-                  subtitle={`${sender}. ${newRules} new rules, ${knownRules} already here.`}
-                  trailing={isNew ? 'New' : undefined}
-                />
+              <Notice>
+                New sources start off. Turning one on stores every message from that sender in this
+                app, personal ones included, so turn on only a bank or a service you trust.
+              </Notice>
+              {preview.sources.map(({ name, sender, isNew, rules: added, knownRules }) => (
+                <Fragment key={sender}>
+                  <ListRow
+                    title={name}
+                    subtitle={`${sender}. ${added.length} new rules, ${knownRules} already here.`}
+                    trailing={isNew ? (enabledSenders.has(sender) ? 'On' : 'Off') : undefined}
+                    onPress={isNew ? () => toggle(sender) : undefined}
+                  />
+                  {added.map(({ name: title, priority, template }, index) => (
+                    <Muted key={index}>{`${title}, priority ${priority}: ${template}`}</Muted>
+                  ))}
+                </Fragment>
               ))}
               <SectionLabel>Your accounts</SectionLabel>
               {preview.slots.accounts.map((slot) => (
