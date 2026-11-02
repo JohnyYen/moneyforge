@@ -278,6 +278,12 @@ describe('fetch on-chain client', () => {
       expect(calls).toHaveLength(4);
     });
 
+    it('says a busy endpoint is limiting requests', async () => {
+      const { fetch } = scripted(() => failure(429), () => failure(429));
+      const result = await client(fetch).readBalance(evm);
+      expect(result.ok ? '' : result.error.message).toMatch(/limiting requests.*another endpoint/);
+    });
+
     it('stops at the bound', async () => {
       const { fetch, calls } = scripted(() => failure(503), () => failure(503), () => failure(503));
       await expect(client(fetch).readBalance(evm)).resolves.toMatchObject({

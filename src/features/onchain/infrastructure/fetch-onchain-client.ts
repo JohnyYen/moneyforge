@@ -79,9 +79,12 @@ export function createFetchOnChainClient({
         redirect: 'error',
         credentials: 'omit',
       });
+      if (response.status === 429) {
+        const message = `${host} is limiting requests. Wait a little, or set another endpoint.`;
+        return err(onChainError('network-failed', message));
+      }
       if (!response.ok) {
-        const busy = response.status === 429 || response.status >= 500;
-        const code = busy ? 'network-failed' : 'endpoint-refused';
+        const code = response.status >= 500 ? 'network-failed' : 'endpoint-refused';
         return err(onChainError(code, `${host} answered with status ${response.status}.`));
       }
       const declared = Number(response.headers.get('content-length') ?? 0);

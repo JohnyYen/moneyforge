@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { AssetsContext } from '@/features/assets/ui/assets-context';
 import { LedgerContext } from '@/features/ledger/ui/ledger-context';
+import { OnChainContext } from '@/features/onchain/ui/onchain-context';
 import { PlanningContext } from '@/features/planning/ui/planning-context';
 import { CaptureContext } from '@/features/rules/ui/capture-context';
 import { RulesContext } from '@/features/rules/ui/rules-context';
@@ -55,7 +56,9 @@ export function AppServicesProvider({ children }: { children: ReactNode }) {
           <CaptureContext.Provider value={state.services.capture}>
             <PlanningContext.Provider value={state.services.planning}>
               <AssetsContext.Provider value={state.services.assets}>
-                {children}
+                <OnChainContext.Provider value={state.services.onchain}>
+                  {children}
+                </OnChainContext.Provider>
               </AssetsContext.Provider>
             </PlanningContext.Provider>
           </CaptureContext.Provider>

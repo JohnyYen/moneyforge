@@ -10,7 +10,7 @@ import { useLedger } from '../ledger-context';
 import { ReconcileView } from './reconcile-view';
 
 export function ReconcileScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, counted } = useLocalSearchParams<{ id: string; counted?: string }>();
   const ledger = useLedger();
   const router = useRouter();
   const load = useCallback(
@@ -33,6 +33,7 @@ export function ReconcileScreen() {
             accountName={detail.account.name}
             currency={detail.currency}
             balance={detail.balance}
+            initialCounted={counted}
             error={error}
             submitting={submitting}
             onSubmit={submit}

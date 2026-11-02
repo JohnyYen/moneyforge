@@ -143,8 +143,20 @@ The Assets tab holds what you own beyond your accounts. Asset types are user dat
 - Actual cash flow is the income and expenses linked to an asset: from the transaction form, later from the transaction's screen, or by a message rule. A link survives edits to the transaction and goes when it is deleted. A link to a stream also places the transaction on a stream date: an open date within half a step before it, otherwise the closest open date. A date is covered once linked amounts of the stream's kind reach the stream amount, so two payments of 500 cover a date of 1000, and until then further payments stay on that date. Dates follow edits to the transaction or to the stream.
 - A report for a period shows actual and expected income, expense, and net, plus net yield on the latest value by the end of the period. Linked entries in another currency convert at the rate of their day into the currency of the asset. A currency with no rate is reported, never read as zero, and the yield and the difference from expected stay empty until it has one.
 - The portfolio totals active assets at today's rate and nets this month's linked cash flow, in the base currency. Net worth stays accounts only, and "Include assets" shows a second total.
-- The cash flow projection adds streams of assets with a linked account, except covered dates. Uncovered expense dates from the last 90 days count today. Past income does not. A date with part of its amount paid still projects in full.
+- The cash flow projection adds streams of assets with a linked account, except covered dates. Uncovered expense dates from the last 90 days count today. Past income does not. A date with part of its amount paid projects only what is left of it. The stream editor warns when an expense starts in the past, because those recent dates then count as owed.
 - The asset and the projection show a notice when a stream stays out: an archived account, no linked account, or no account in the asset's currency. They also show one when a stream looks like a recurring item on the same account: same kind, amount, and cadence, in overlapping date ranges. Nothing merges them.
+
+## On-chain balances
+
+More, then On-chain balances, reads token balances by public address. MoneyForge never holds keys, signs, or sends anything. It is read-only by construction: the client port has one method, which reads a balance.
+
+- A watched address has a chain, a token, a public address, a label, and optionally an account to compare with. Chains and tokens are user data, seeded with USDT on Tron, USDT on Ethereum, and USDC on Ethereum, and every endpoint is editable.
+- Tron addresses are checked by base58check, EVM addresses by EIP-55 when mixed case. Anything that looks like a private key or a seed phrase is refused and never stored: 64 hex characters, WIF or extended keys, or 12 or more words of 3 to 8 letters. There is no word list, so an ordinary sentence of that shape is refused too.
+- Nothing is contacted until you turn network reads on in network settings, and then only when you press Refresh. There is no background polling. The endpoint learns the address and your IP address, and can tie them together. Addresses are public by design.
+- Each read confirms the chain ID on EVM endpoints and checks the stored decimals against the contract. Amounts are exact, and a malformed or oversized answer is refused. Calls time out after 8 seconds, with one retry.
+- The last amount and time stay available offline, marked stale after an hour.
+- With a linked account, an address shows how the amount compares with the ledger, and a difference offers the reconcile form, filled in. Nothing is recorded until you press Reconcile. An account must be in a currency whose code is the token's symbol. An amount finer than the account's decimals is rounded down, and counts as a match when that is the only difference.
+- Public endpoints limit keyless requests, and TronGrid does so quickly. Point a chain at your own endpoint if a refresh is refused.
 
 ## License
 

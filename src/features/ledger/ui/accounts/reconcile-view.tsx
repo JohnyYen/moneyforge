@@ -17,6 +17,7 @@ export function ReconcileView({
   accountName,
   currency,
   balance,
+  initialCounted = '',
   error,
   submitting,
   onSubmit,
@@ -24,11 +25,13 @@ export function ReconcileView({
   accountName: string;
   currency: Currency;
   balance: bigint;
+  /** A proposal from elsewhere. Nothing is recorded until the person presses Reconcile. */
+  initialCounted?: string;
   error: string | null;
   submitting: boolean;
   onSubmit: (countedBalance: string) => void;
 }) {
-  const [counted, setCounted] = useState('');
+  const [counted, setCounted] = useState(initialCounted);
   const parsed = counted ? parseDecimal(counted, currency.decimals) : null;
   const difference = parsed?.ok ? parsed.value - balance : null;
 
@@ -50,6 +53,7 @@ export function ReconcileView({
             : `An adjustment of ${formatDisplay(difference, currency)} will be recorded.`}
         </Muted>
       ) : null}
+      {initialCounted ? <Muted>Filled in for you. Check it before you confirm.</Muted> : null}
       <ErrorBanner message={error} />
       <Button
         label="Reconcile"

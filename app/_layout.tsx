@@ -46,6 +46,13 @@ export default function RootLayout() {
             <Stack.Screen name="assets/[id]/valuation" options={{ title: 'Add value' }} />
             <Stack.Screen name="assets/[id]/stream" options={{ title: 'Expected flow' }} />
             <Stack.Screen name="assets/[id]/rules" options={{ title: 'Rules that link here' }} />
+            <Stack.Screen name="onchain/index" options={{ title: 'On-chain balances' }} />
+            <Stack.Screen name="onchain/new" options={{ title: 'Watch an address' }} />
+            <Stack.Screen name="onchain/network" options={{ title: 'Network settings' }} />
+            <Stack.Screen name="onchain/chain" options={{ title: 'Chain' }} />
+            <Stack.Screen name="onchain/token" options={{ title: 'Token' }} />
+            <Stack.Screen name="onchain/[id]/index" options={{ title: 'Address' }} />
+            <Stack.Screen name="onchain/[id]/edit" options={{ title: 'Edit address' }} />
             <Stack.Screen name="inbox/index" options={{ title: 'Inbox' }} />
             <Stack.Screen name="inbox/paste" options={{ title: 'Paste a message' }} />
             <Stack.Screen name="inbox/[id]" options={{ title: 'Review message' }} />

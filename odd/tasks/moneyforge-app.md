@@ -47,7 +47,7 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `aaa85ce`.
+Review base for the next candidate: `e38c714`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
@@ -62,8 +62,8 @@ Review base for the next candidate: `aaa85ce`.
 - [x] T6.1 T6 hardening: verified review findings on backfill of auto items, budget and recurring double counts, posted notes, rollover edits, refunds, restore on a due date, per-date markers, future budgets, currency decimals, unprojected transfers, and rate lookups. Commits: `a33fdc5`, `5485a50`.
 - [x] T7a Assets: types, values, expected and actual cash flow, reports, portfolio, net worth with assets, projection source, Assets tab. Planning follow-ups included. Commits: `ac6a8a5`, `9d4dabf`, and the `feat(assets): add the Assets tab and link transactions from their screens` commit that records this line.
 - [x] T7a.1 T7a hardening: verified findings on stream edits, coverage by amount and current transaction state, overdue expenses, budget double counts, late payments, projection notices, link failures, and report figures. Commit: `df4f609`.
-- [ ] T7b On-chain balances: read-only balances by public address.
-- [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy. Rule packs exclude samples. Backup must carry `rules.dedup_secret`, or every stored dedup key stops matching after a restore.
+- [x] T7b On-chain balances: read-only balances by public address. Commits: `abdcd66` (T7a.1 advisory), `c717c4b`, and the `feat(onchain): add the on-chain screens` commit that records this line.
+- [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy. Rule packs exclude samples. Backup must carry `rules.dedup_secret`, or every stored dedup key stops matching after a restore. A chain endpoint may hold an API key, so a plain export must leave `onchain_chains.endpoint` out or say so.
 
 ## Acceptance criteria
 
@@ -424,7 +424,43 @@ T7a.1 evidence:
   - `CashFlowScreen` takes `projectionExtra`, and `CashFlowWithAssets` wraps it, so planning still does not import assets.
   - `linkAfterSave` turns a refused or thrown link into an alert and always continues to the split proposal. Supersedes the last sentence of the T7a wrapper decision for a link failure. An alert, because the screen is about to leave.
   - `difference` is empty while rates are missing. The report's latest value is the latest by the end of its period.
+- review: medium, approved by native review
+- Advisories, with the warning text not exported, so each location was read on its own:
+  - `asset-flows.ts:75-77`: a part paid date projected in full. `9893cf8` fixed it through `paidByDate`, and supersedes the T7a.1 decision that a date with part of its amount paid projects the whole amount. Nothing further is wrong here. An amount above a date's stream amount does not spill to the next date, on purpose: the excess may be a fee, and spilling would be a guess.
+  - `asset-flows.ts:108-110`: `9893cf8` carries only what is left of an overdue date. One gap remained: an expense stream entered late counted up to 90 days of unlinked dates as owed, with nothing to warn the person. Fixed in `abdcd66` with `overdueStartNotice` in the stream editor. RED: 2 failed of 29. The carrying itself stays, as T7a.1 decided.
+  - `asset-projection-notices.tsx:12-32`: a failed load showed nothing, and a repeated message repeated a key. `9893cf8` fixed both, through a notice and `shownNotices`. Nothing further is wrong here.
+
+T7b done. Route: delegated direct; 2+ non-trivial files.
+
+T7b evidence:
+
+- RED: domain, 5 suites failed with `Cannot find module`. Client, its suite failed the same way. Service, 36 failed of 36. UI model, its suite failed with `Cannot find module`, and the rate limit message failed 1 of 37.
+- GREEN: `pnpm test`: 65 suites, 1395 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exported one 3.6 MB Hermes bundle.
+- The on-chain suites also passed with `TZ` set to `Pacific/Auckland`, `Pacific/Pago_Pago`, and `America/New_York`, 159 of 159 each.
+- Mutations, each failing tests: `refresh` ignoring the switch (2), `refreshAll` ignoring it (1), no secret refusal (6), `saveRead` with no row guard (3), no decimals check (1), network inside a write (4), no EIP-55 check (1), no token chain check (1), comparison ignoring finer digits (1).
+- Live smoke, read-only, with the real client under Node and no key. Read each token contract's own balance. Tron at `api.trongrid.io`: USDT 9782781.902930, decimals 6. Ethereum at `ethereum-rpc.publicnode.com`: USDT 1216042.640875, decimals 6, chain ID 1. A wrong chain ID returned `chain-mismatch`.
+- From that run: TronGrid answered 429 to the next two reads, so a keyless Tron refresh of several addresses can fail. The `CONTRACT_VALIDATE_ERROR` shape and a Tron owner with no activity were therefore never seen live; only fakes cover them.
+- USDC on Ethereum was confirmed live before seeding: `symbol()` returned `USDC` and `decimals()` 6 at `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`.
+- Over the 2000 line target: about 3270 authored lines, 1370 of them tests. Commits are sliced so review can take them apart: domain to storage at 2274 lines, then the UI.
+- Not run: no device run, Gradle build, or screen rendering test. Migration 006 ran on `node:sqlite` only. `fetch` under Hermes, `AbortController` there, `redirect` and `credentials` handling in React Native, every On-chain screen, `ScreenedField`, the reconcile prefill, and `router.dismissTo` are compiled, never executed. `onchain-model` is tested on its own.
+- Decisions:
+  - The token's `symbol` must equal the linked account's currency code, because `compareBalance` means nothing across currencies. An account is optional. Editing a symbol later stops the comparison and keeps the link.
+  - `LastRead` stores its own decimals, so editing a token cannot reinterpret an old amount. A new contract clears reads of that token. A new address or token on a watched row clears its read.
+  - Beyond the brief: EVM endpoints must answer `eth_chainId` with the stored chain ID, so a pasted URL of another network cannot return a plausible balance. Tron has no such check, because a Tron read has no equivalent call in use here.
+  - Beyond the brief: `saveRead` is a conditional update on id, token, address, contract, and time. The network runs outside any write, so a read of something edited or removed meanwhile is dropped, and an older answer cannot replace a newer one.
+  - An EVM read costs 3 calls and a Tron read 2. Decimals come first, so a contract that cannot answer costs nothing more. Refresh all runs one address at a time.
+  - Timeout 8 seconds per call, 2 attempts, retry only on timeout, connection failure, 429, or 5xx. The timer is raced as well as aborting, because a React Native body read may ignore abort. React Native's `text()` has no byte limit, so an undeclared large body is bounded by the timeout and refused after reading. Declared length is refused before reading.
+  - Endpoint text is never shown. An RPC error shows its code only, and messages name the host only, because a path may hold an API key.
+  - Endpoints must be `https://` with no credentials, parsed with a pattern, since React Native's `URL` has no hostname.
+  - The secret guard runs first in every use case, on every typed field including the endpoint, so a 64 hex API key in an endpoint path is refused too. `ScreenedField` also drops such text before it reaches form state. Beyond the brief: extended private keys, 15, 18, and 21 words, and a key inside longer text. With no word list, 12 or more words of 3 to 8 letters are refused, which errs toward refusing a real sentence.
+  - An amount finer than the account's decimals rounds down. If that is the only difference, the status is `within-precision` and nothing is offered, because reconcile refuses extra digits.
+  - A stale read may still open reconcile, with the read time and a notice on screen. The form says it was filled in, and the person must press Reconcile.
+  - Stale means older than one hour, a constant, not user data.
+  - Chains and tokens can be added and edited, not deleted. A family and a token's chain are fixed once created.
 
 ## Next step
 
-T7b: read-only on-chain balances by public address. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002, 003, 004, and 005 over an existing database under `expo-sqlite`.
+T8: data and release. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002, 003, 004, 005, and 006 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes.
