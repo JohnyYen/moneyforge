@@ -16,7 +16,7 @@ export function streamDates(
   return occurrencesBetween(schedule, from, soldOn ? earlierDay(to, addDays(soldOn, -1)) : to);
 }
 
-const OVERDUE_LOOKBACK_DAYS = 90;
+export const OVERDUE_LOOKBACK_DAYS = 90;
 
 /** A payment in the stream's currency. */
 export type PaymentMeasure = (payment: StreamPayment) => bigint;

@@ -11,6 +11,7 @@ import {
   linkAfterSave,
   linkInputFor,
   NO_SELECTION,
+  overdueStartNotice,
   percentLabel,
   projectionNotices,
   shownNotices,
@@ -189,6 +190,22 @@ describe('linkAfterSave', () => {
     const notice = await linkAfterSave({ id: 't1', kind: 'transfer' }, selection, link);
     expect(notice).toMatch(/not linked/);
     expect(link).not.toHaveBeenCalled();
+  });
+});
+
+describe('overdueStartNotice', () => {
+  const today = '2026-03-10';
+
+  it('says recent dates of an expense with a past start count as owed', () => {
+    expect(overdueStartNotice({ kind: 'expense', startOn: '2024-01-01' }, today)).toMatch(
+      /last 90 days .* count as owed today/,
+    );
+  });
+
+  it('stays quiet for income, from today on, and on text that is not yet a date', () => {
+    expect(overdueStartNotice({ kind: 'income', startOn: '2024-01-01' }, today)).toBeNull();
+    expect(overdueStartNotice({ kind: 'expense', startOn: today }, today)).toBeNull();
+    expect(overdueStartNotice({ kind: 'expense', startOn: '20' }, today)).toBeNull();
   });
 });
 

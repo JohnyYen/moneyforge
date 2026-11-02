@@ -1,5 +1,6 @@
 import type { Account } from '@/features/ledger/domain/account';
 import type { Currency } from '@/features/ledger/domain/currency';
+import { isValidDate } from '@/features/ledger/domain/exchange-rate';
 import type { Transaction } from '@/features/ledger/domain/journal';
 import { formatDecimal, formatDisplay } from '@/features/ledger/domain/money';
 import { convertMinor, type ExactRate } from '@/features/ledger/domain/rate';
@@ -17,7 +18,7 @@ import type { Result } from '@/shared/result';
 import type { LinkInput } from '../application/link-use-cases';
 import type { AssetInput, StreamInput } from '../application/asset-use-cases';
 import type { Asset, AssetType, ExpectedStream, StreamKind, Valuation } from '../domain/asset';
-import { overlapsRecurring } from '../domain/asset-flows';
+import { OVERDUE_LOOKBACK_DAYS, overlapsRecurring } from '../domain/asset-flows';
 import type { PortfolioRow } from '../domain/asset-report';
 
 export type Currencies = ReadonlyMap<string, Currency>;
@@ -223,6 +224,19 @@ export function projectionNotices(input: {
         })),
     );
   });
+}
+
+/**
+ * A stream entered late has past dates nobody linked a payment to, and an expense counts those as
+ * owed, so the person should hear it before the projection drops.
+ */
+export function overdueStartNotice(
+  { kind, startOn }: Pick<StreamDraft, 'kind' | 'startOn'>,
+  today: Day,
+): string | null {
+  const day = startOn.trim();
+  if (kind !== 'expense' || !isValidDate(day) || day >= today) return null;
+  return `Dates in the last ${OVERDUE_LOOKBACK_DAYS} days with no linked payment count as owed today.`;
 }
 
 /** Messages to show, once each, because a message also keys its row. */

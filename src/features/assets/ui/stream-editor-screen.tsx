@@ -12,6 +12,7 @@ import {
   ChoiceChips,
   EmptyState,
   ErrorBanner,
+  Notice,
   QueryBoundary,
   Screen,
   TextField,
@@ -22,6 +23,7 @@ import { useSubmit } from '@/shared/ui/use-submit';
 import type { StreamKind } from '../domain/asset';
 import {
   emptyStreamDraft,
+  overdueStartNotice,
   toStreamDraft,
   toStreamInput,
   type StreamDraft,
@@ -53,6 +55,7 @@ function StreamForm({
   const [draft, setDraft] = useState(initial);
   const update = (change: Partial<StreamDraft>) =>
     setDraft((current) => ({ ...current, ...change }));
+  const notice = onRemove ? null : overdueStartNotice(draft, toLocalDay(new Date()));
   const categoryOptions = [
     { value: NO_CATEGORY, label: 'None' },
     ...categories
@@ -81,6 +84,7 @@ function StreamForm({
         onChange={(value) => update({ categoryId: value === NO_CATEGORY ? '' : value })}
       />
       <ScheduleFields draft={draft} onChange={update} />
+      {notice ? <Notice>{notice}</Notice> : null}
       <ErrorBanner message={error} />
       <Button label="Save" disabled={submitting} onPress={() => onSubmit(draft)} />
       {onRemove ? (
