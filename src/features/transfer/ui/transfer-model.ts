@@ -1,7 +1,13 @@
 import type { NumberFormat } from '@/features/rules/domain/number-format';
 import { err, ok, type Result } from '@/shared/result';
 
-import type { CsvImportInput, CsvReport, RowFailure } from '../application/transfer-service';
+import type {
+  CsvImportInput,
+  CsvPreview,
+  CsvReport,
+  RowFailure,
+  UndoReport,
+} from '../application/transfer-service';
 import { parseCsv, type CsvSeparator } from '../domain/csv';
 import type { DateFormat, RowKind } from '../domain/csv-import';
 
@@ -48,6 +54,7 @@ export type CsvDraft = {
   readonly dateColumn: string;
   readonly descriptionColumn: string;
   readonly categoryColumn: string;
+  readonly currencyColumn: string;
   readonly amountMode: 'single' | 'split';
   readonly amountColumn: string;
   readonly debitColumn: string;
@@ -68,6 +75,7 @@ export const emptyCsvDraft: CsvDraft = {
   dateColumn: '',
   descriptionColumn: '',
   categoryColumn: '',
+  currencyColumn: '',
   amountMode: 'single',
   amountColumn: '',
   debitColumn: '',
@@ -112,6 +120,7 @@ export function toCsvInput(draft: CsvDraft): Result<CsvImportInput, { message: s
       date,
       description: column(draft.descriptionColumn),
       category: column(draft.categoryColumn),
+      currency: column(draft.currencyColumn),
       amount: single
         ? { mode: 'single', column: first, positive: draft.positive }
         : { mode: 'split', debit: first, credit: second },
@@ -135,6 +144,39 @@ export function failureLines(failures: readonly RowFailure[]): string[] {
     .map(({ line, reason }) => `Line ${line}: ${reason}`);
   const hidden = failures.length - shown.length;
   return hidden > 0 ? [...shown, `And ${hidden} more.`] : shown;
+}
+
+/** What a person reads before confirming: the file as parsed, not only how many rows it holds. */
+export function previewLines({
+  valid,
+  firstRows,
+  range,
+  moneyIn,
+  moneyOut,
+  currencyCode,
+}: CsvPreview): string[] {
+  if (!range) return [];
+  const rows = firstRows.map(({ day, kind, amount, description }) => {
+    const direction = kind === 'income' ? 'In' : 'Out';
+    return `${day}  ${direction} ${amount} ${currencyCode}  ${description || 'No description'}`;
+  });
+  const hidden = valid - rows.length;
+  return [
+    `From ${range.from} to ${range.to}. In ${moneyIn} ${currencyCode}, out ${moneyOut} ${currencyCode}.`,
+    ...rows,
+    ...(hidden > 0 ? [`And ${hidden} more.`] : []),
+  ];
+}
+
+export function undoLines({ removed, kept }: UndoReport): string[] {
+  const rows = `Removed ${removed} row${removed === 1 ? '' : 's'}.`;
+  if (kept.length === 0) return [rows];
+  return [
+    `${rows} ${kept.length} could not be removed.`,
+    ...kept
+      .slice(0, FAILURES_SHOWN)
+      .map(({ description, reason }) => `${description || 'No description'}: ${reason}`),
+  ];
 }
 
 export function reportLabel({ imported, duplicates, invalid }: CsvReport): string {

@@ -110,7 +110,7 @@ export function createAppServices(deps: {
       client: deps.onChainClient ?? absentOnChainClient,
     }),
     transfer: createTransferService({
-      store: createSqliteTransferStore(driver),
+      store: createSqliteTransferStore(driver, transactionGuard),
       clock,
       generateId,
       // One secret to carry through a backup, or stored keys would stop matching.

@@ -2,10 +2,11 @@ import { isValidDate } from '@/features/ledger/domain/exchange-rate';
 import { parseDecimal } from '@/features/ledger/domain/money';
 import { foldCase, normalizeBody } from '@/features/rules/domain/message';
 import { parseAmountText, type NumberFormat } from '@/features/rules/domain/number-format';
+import { MAX_FIELD_LENGTH } from '@/features/rules/domain/template';
 import { keyedHash } from '@/shared/keyed-hash';
 import { err, ok, type Result } from '@/shared/result';
 
-import type { CsvRow } from './csv';
+import { foldNeutralized, type CsvRow } from './csv';
 
 export const DATE_FORMATS = ['ymd', 'dmy', 'mdy'] as const;
 export type DateFormat = (typeof DATE_FORMATS)[number];
@@ -13,6 +14,8 @@ export type DateFormat = (typeof DATE_FORMATS)[number];
 export type RowKind = 'income' | 'expense';
 
 export const MAX_CATEGORY_NAME = 64;
+/** An older date is a typing or column mistake, and no ledger here reaches back that far. */
+const MIN_YEAR = 1900;
 
 export type AmountMapping =
   | { readonly mode: 'single'; readonly column: number; readonly positive: RowKind }
@@ -24,6 +27,8 @@ export type CsvMapping = {
   readonly description: number | null;
   readonly amount: AmountMapping;
   readonly category: number | null;
+  /** When chosen, a row in another currency is invalid instead of read as the account's. */
+  readonly currency: number | null;
   readonly dateFormat: DateFormat;
   readonly numberFormat: NumberFormat;
 };
@@ -51,6 +56,7 @@ export function parseDay(text: string, format: DateFormat): string | null {
         ? [third, second, first]
         : [third, first, second];
   if (year.length !== 4 || month.length > 2 || day.length > 2) return null;
+  if (Number(year) < MIN_YEAR) return null;
   const iso = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
   return isValidDate(iso) ? iso : null;
 }
@@ -62,6 +68,9 @@ export function parseAmount(
   decimals: number,
 ): Result<bigint, string> {
   const trimmed = text.trim();
+  if (trimmed.length > MAX_FIELD_LENGTH) {
+    return err(`The amount is over ${MAX_FIELD_LENGTH} characters.`);
+  }
   const negative = trimmed.startsWith('-');
   const digits = /^[+-]/.test(trimmed) ? trimmed.slice(1) : trimmed;
   const plain = parseAmountText(digits, format);
@@ -108,14 +117,20 @@ export function readRow(
   { cells }: CsvRow,
   mapping: CsvMapping,
   columns: number,
-  decimals: number,
+  currency: { readonly code: string; readonly decimals: number },
 ): Result<ImportRow, string> {
   if (cells.length !== columns) {
     return err(`Expected ${columns} columns, found ${cells.length}.`);
   }
   const day = parseDay(cells[mapping.date], mapping.dateFormat);
   if (!day) return err(`Cannot read the date "${cells[mapping.date].trim()}" in this format.`);
-  const signed = readSigned(cells, mapping, decimals);
+  if (mapping.currency !== null) {
+    const code = foldNeutralized(cells[mapping.currency]).trim();
+    if (foldCase(code) !== foldCase(currency.code)) {
+      return err(`The currency "${code}" is not this account's ${currency.code}.`);
+    }
+  }
+  const signed = readSigned(cells, mapping, currency.decimals);
   if (!signed.ok) return signed;
   const text = (column: number | null) => (column === null ? '' : normalizeBody(cells[column]));
   const category = text(mapping.category);
@@ -134,6 +149,8 @@ export function readRow(
  * Built from what a row means, not its text, so the same statement in another format still
  * matches. `repeat` tells two identical rows in a file apart: both are real, and a re-import
  * finds each one. Keyed, so stored fingerprints reveal nothing about amounts or descriptions.
+ * An exported description matches its original, or importing an export would double every row
+ * that looks like a formula.
  */
 export function rowFingerprint(
   accountId: string,
@@ -147,4 +164,5 @@ export function rowFingerprint(
 export const rowIdentity = (
   accountId: string,
   { day, kind, minor, description }: Pick<ImportRow, 'day' | 'kind' | 'minor' | 'description'>,
-) => [accountId, day, kind, minor, foldCase(normalizeBody(description))].join('\0');
+) =>
+  [accountId, day, kind, minor, foldCase(normalizeBody(foldNeutralized(description)))].join('\0');

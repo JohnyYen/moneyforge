@@ -51,6 +51,16 @@ export function parseCsv(
     if (!blank) rows.push({ line: rowLine, cells });
     cells = [];
   };
+  /** A row's last cell has no separator after it, so it is counted here. */
+  const overLimit = () => {
+    const last = rows[rows.length - 1];
+    if (last && last.cells.length > MAX_CSV_COLUMNS) {
+      return tooLarge(`A row can have up to ${MAX_CSV_COLUMNS} columns.`);
+    }
+    return rows.length > MAX_CSV_ROWS
+      ? tooLarge(`A file can have up to ${MAX_CSV_ROWS} rows.`)
+      : null;
+  };
 
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index];
@@ -73,7 +83,8 @@ export function parseCsv(
       }
     } else if (character === '\n' || character === '\r') {
       endRow();
-      if (rows.length > MAX_CSV_ROWS) return tooLarge(`A file can have up to ${MAX_CSV_ROWS} rows.`);
+      const refused = overLimit();
+      if (refused) return refused;
       if (character === '\r' && next === '\n') index += 1;
       line += 1;
       rowLine = line;
@@ -91,8 +102,7 @@ export function parseCsv(
   }
   if (quoted) return malformed(`Line ${quoteLine}: a quote is never closed.`);
   endRow();
-  if (rows.length > MAX_CSV_ROWS) return tooLarge(`A file can have up to ${MAX_CSV_ROWS} rows.`);
-  return ok(rows);
+  return overLimit() ?? ok(rows);
 }
 
 const needsQuotes = /[",\r\n]/;
@@ -104,13 +114,27 @@ export function writeCsv(rows: readonly (readonly string[])[]): string {
   return rows.map((row) => `${row.map(cell).join(',')}\r\n`).join('');
 }
 
-const FORMULA_START = /^[=+\-@\uFF1D\uFF0B\uFF0D\uFF20]/;
+const FORMULA_CHARACTER = '[=+\\-@\\uFF1D\\uFF0B\\uFF0D\\uFF20]';
+const FORMULA_START = new RegExp(`^${FORMULA_CHARACTER}`);
+const AFTER_SEMICOLON = new RegExp(`;(\\s*)(?=${FORMULA_CHARACTER})`, 'g');
+const NEUTRALIZED_START = new RegExp(`^'(?=\\s|${FORMULA_CHARACTER})`);
+const NEUTRALIZED_AFTER_SEMICOLON = new RegExp(`;(\\s*)'(?=${FORMULA_CHARACTER})`, 'g');
 
 /**
  * A spreadsheet runs a cell that starts with one of these, and some drop leading space first.
- * The apostrophe makes it text. Full-width forms are included, since some apps fold them.
+ * The apostrophe makes it text. Full-width forms are included, since some apps fold them. A
+ * semicolon is treated like the start of a cell, because under a `;` list separator it is one.
  */
 export function neutralizeFormula(text: string): string {
-  const risky = /^[\t\r]/.test(text) || FORMULA_START.test(text.trimStart());
-  return risky ? `'${text}` : text;
+  const inner = text.replace(AFTER_SEMICOLON, ";$1'");
+  const risky = /^[\t\r]/.test(inner) || FORMULA_START.test(inner.trimStart());
+  return risky ? `'${inner}` : inner;
+}
+
+/** Undoes `neutralizeFormula`, so text and its exported form count as the same text. */
+export function foldNeutralized(text: string): string {
+  return text
+    .replace(NEUTRALIZED_START, '')
+    .trimStart()
+    .replace(NEUTRALIZED_AFTER_SEMICOLON, ';$1');
 }

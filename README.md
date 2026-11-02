@@ -162,11 +162,11 @@ More, then On-chain balances, reads token balances by public address. MoneyForge
 
 Under More, Data.
 
-CSV import reads pasted or shared text into one account. The person picks the separator, the columns, and the date and number formats, because `03/04` and `1.500` each have two readings. A row that does not fit is shown as invalid and is never guessed at. Nothing is written before the preview is confirmed. The valid rows then post in one atomic batch through the ledger, and a failure leaves nothing. Invalid and duplicate rows are skipped and reported.
+CSV import reads pasted or shared text into one account. The person picks the separator, the columns, and the date and number formats, because `03/04` and `1.500` each have two readings. A row that does not fit is shown as invalid and is never guessed at. Nothing is written before the preview is confirmed. The valid rows then post in one atomic batch through the ledger, and a failure leaves nothing. Invalid and duplicate rows are skipped and reported. The preview shows the first rows as read, the date range, and the totals in and out. After importing, "Undo this import" removes that batch in one write, except rows another feature depends on, such as a split, which stay and are reported. An optional currency column makes a row in another currency invalid. An export of all accounts is refused, since its rows belong to several accounts.
 
 Each imported row keeps a keyed fingerprint of its account, day, kind, amount, and description, so importing a file again adds nothing. Identical rows in one file stay separate entries. Deleting a transaction releases its fingerprint, so that row can return.
 
-CSV export writes one row per account a transaction touched, with exact amounts. Text that a spreadsheet would run as a formula is neutralized with a leading apostrophe. It uses the system share sheet, so it carries text and refuses more than 200,000 characters rather than cutting it short.
+CSV export writes one row per account a transaction touched, with exact amounts. Text that a spreadsheet would run as a formula is neutralized with an apostrophe, also after a `;`, and importing an export back still matches the original rows. It uses the system share sheet, so it carries text and refuses more than 200,000 characters rather than cutting it short.
 
 Rule packs share sources and rules with no personal data. See [rule-packs](rule-packs/README.md).
 

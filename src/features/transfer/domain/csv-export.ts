@@ -4,7 +4,7 @@ import type { Currency } from '@/features/ledger/domain/currency';
 import type { Transaction } from '@/features/ledger/domain/journal';
 import { formatDecimal } from '@/features/ledger/domain/money';
 
-import { neutralizeFormula } from './csv';
+import { neutralizeFormula, type CsvRow } from './csv';
 
 export const CSV_HEADER = [
   'date',
@@ -15,6 +15,18 @@ export const CSV_HEADER = [
   'currency',
   'amount',
 ] as const;
+
+/**
+ * An export of one account has the same header, and importing that back is safe, so only rows
+ * naming two accounts tell them apart.
+ */
+export function isAllAccountsExport([header, ...rows]: readonly CsvRow[]): boolean {
+  const ours =
+    header?.cells.length === CSV_HEADER.length &&
+    CSV_HEADER.every((name, index) => header.cells[index].trim() === name);
+  const column = CSV_HEADER.indexOf('account');
+  return ours && new Set(rows.map(({ cells }) => cells[column])).size > 1;
+}
 
 export type ExportLookups = {
   readonly accounts: readonly Account[];

@@ -4,6 +4,7 @@ export type TransferErrorCode =
   | 'invalid-range'
   | 'too-large'
   | 'import-failed'
+  | 'mixed-accounts'
   | 'not-found'
   | 'account-archived';
 

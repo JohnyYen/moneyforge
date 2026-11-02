@@ -65,6 +65,7 @@ describe('transfer service', () => {
       description: 1,
       amount: { mode: 'single', column: 2, positive: 'income' },
       category: 3,
+      currency: null,
       dateFormat: 'ymd',
       numberFormat: { decimal: '.', thousands: ',' },
     },
@@ -79,6 +80,12 @@ describe('transfer service', () => {
       await driver.all('SELECT * FROM categories ORDER BY id'),
       await driver.all('SELECT * FROM imported_rows ORDER BY fingerprint'),
     ]);
+
+  const category = async (name: string) => {
+    const found = (await services.ledger.listCategories()).find((item) => item.name === name);
+    if (!found) throw new Error(`No category ${name}`);
+    return found;
+  };
 
   const balance = async () =>
     (await services.ledger.accountBalances()).find(({ account }) => account.id === accountId)
@@ -105,6 +112,71 @@ describe('transfer service', () => {
       await expect(
         services.transfer.previewCsv(input({ accountId: 'nope' })),
       ).resolves.toMatchObject({ ok: false, error: { code: 'not-found' } });
+    });
+
+    it('shows rows as parsed, their dates, and what moves in and out', async () => {
+      const preview = unwrap(await services.transfer.previewCsv(input()));
+      expect(preview.firstRows[0]).toEqual({
+        day: '2026-01-02',
+        kind: 'income',
+        amount: '1000.50',
+        description: 'Salary',
+      });
+      expect(preview.firstRows[1]).toEqual({
+        day: '2026-01-03',
+        kind: 'expense',
+        amount: '3.25',
+        description: 'Coffee',
+      });
+      expect(preview).toMatchObject({
+        range: { from: '2026-01-02', to: '2026-01-04' },
+        moneyIn: '1000.50',
+        moneyOut: '7.50',
+        currencyCode: 'USD',
+      });
+    });
+
+    it('keeps the list short and counts only what would be imported', async () => {
+      const rows = Array.from({ length: 12 }, (_, day) => `2026-02-${day + 10},Row,-1.00,Treats`);
+      const text = [...CSV.split('\n'), ...rows].join('\n');
+      unwrap(await services.transfer.importCsv(input()));
+      const preview = unwrap(await services.transfer.previewCsv(input({ text })));
+      expect(preview.firstRows).toHaveLength(5);
+      expect(preview).toMatchObject({
+        range: { from: '2026-02-10', to: '2026-02-21' },
+        moneyIn: '0.00',
+        moneyOut: '12.00',
+      });
+    });
+
+    it('has no range when nothing would be imported', async () => {
+      unwrap(await services.transfer.importCsv(input()));
+      expect(unwrap(await services.transfer.previewCsv(input()))).toMatchObject({
+        firstRows: [],
+        range: null,
+      });
+    });
+
+    it.each([
+      ['does not exist', async () => 'not-a-category'],
+      ['is of the other kind', async () => (await category('Wages')).id],
+      [
+        'is archived',
+        async () => {
+          const treats = await category('Treats');
+          unwrap(await services.ledger.updateCategory({ ...treats, archived: true }));
+          return treats.id;
+        },
+      ],
+    ])('refuses a fallback that %s', async (_, pick) => {
+      const refused = input({
+        text: 'Date,Description,Amount,Category\n2026-01-04,Mystery,-1.00,Hobbies',
+        unknownCategories: { action: 'fallback', income: null, expense: await pick() },
+      });
+      await expect(services.transfer.previewCsv(refused)).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'invalid-mapping' },
+      });
     });
 
     it('marks two categories that share a name as ambiguous', async () => {
@@ -261,15 +333,189 @@ describe('transfer service', () => {
 
     it('writes nothing at all when one row fails in the batch', async () => {
       const before = await snapshot();
-      // Salary posts first, and the expense fallback then fails inside the same write.
-      const broken = input({
-        unknownCategories: { action: 'fallback', income: null, expense: 'not-a-category' },
-      });
-      await expect(services.transfer.importCsv(broken)).resolves.toMatchObject({
-        ok: false,
-        error: { code: 'import-failed' },
-      });
+      // Salary posts first, and Mystery then fails inside the same write.
+      await driver.run(`
+        CREATE TRIGGER refuse_mystery BEFORE INSERT ON transactions
+        WHEN NEW.description = 'Mystery'
+        BEGIN SELECT RAISE(ABORT, 'refused'); END
+      `);
+      await expect(services.transfer.importCsv(input())).rejects.toThrow('refused');
+      await driver.run('DROP TRIGGER refuse_mystery');
       expect(await snapshot()).toBe(before);
+    });
+
+    describe('a MoneyForge export', () => {
+      const exportMapping = {
+        date: 0,
+        description: 2,
+        category: 3,
+        currency: 5,
+        amount: { mode: 'single', column: 6, positive: 'income' },
+        dateFormat: 'ymd',
+        numberFormat: { decimal: '.', thousands: '' },
+      } as const;
+
+      const reimport = async (scope: string | null) =>
+        input({
+          text: unwrap(await services.transfer.exportCsv({ accountId: scope, from: '', to: '' })).csv,
+          mapping: exportMapping,
+        });
+
+      it('adds nothing when imported back, formulas included', async () => {
+        const risky = [
+          'Date,Description,Amount',
+          '2026-01-02,=SUM(A1),-1.00',
+          '2026-01-03,-5 apples,-2.00',
+          '2026-01-04,a;=1+1,-3.00',
+        ].join('\n');
+        const mapping = { ...input().mapping, category: null };
+        unwrap(await services.transfer.importCsv(input({ text: risky, mapping })));
+        const preview = unwrap(await services.transfer.previewCsv(await reimport(accountId)));
+        expect(preview).toMatchObject({ valid: 0, duplicates: 3, invalid: [] });
+      });
+
+      it('refuses an export of all accounts, and says what to do', async () => {
+        unwrap(await services.transfer.importCsv(input()));
+        const savings = unwrap(
+          await services.ledger.createAccount({
+            name: 'Savings',
+            type: 'Bank',
+            currencyCode: 'USD',
+            openingBalance: '0',
+          }),
+        ).id;
+        unwrap(await services.ledger.recordExpense({ accountId: savings, amount: '1.00' }));
+        const all = await reimport(null);
+        const refused = {
+          ok: false,
+          error: { code: 'mixed-accounts', message: expect.stringMatching(/all accounts/i) },
+        };
+        await expect(services.transfer.previewCsv(all)).resolves.toMatchObject(refused);
+        await expect(services.transfer.importCsv(all)).resolves.toMatchObject(refused);
+      });
+
+      it('accepts an export of one account, whose header is the same', async () => {
+        unwrap(await services.transfer.importCsv(input()));
+        await expect(
+          services.transfer.previewCsv(await reimport(accountId)),
+        ).resolves.toMatchObject({ ok: true });
+      });
+    });
+
+    describe('a currency column', () => {
+      const text = (code: string) => `Date,Description,Amount,Currency\n2026-01-02,Pay,5.00,${code}`;
+      const withCurrency = (code: string) =>
+        input({ text: text(code), mapping: { ...input().mapping, category: null, currency: 3 } });
+
+      it('accepts rows in the account currency', async () => {
+        await expect(services.transfer.previewCsv(withCurrency(' usd '))).resolves.toMatchObject({
+          value: { valid: 1, invalid: [] },
+        });
+      });
+
+      it.each(['EUR', ''])('marks a row in %j invalid', async (code) => {
+        const preview = unwrap(await services.transfer.previewCsv(withCurrency(code)));
+        expect(preview.valid).toBe(0);
+        expect(preview.invalid[0].reason).toMatch(/USD/);
+      });
+
+      it('cannot share a column with the amount', async () => {
+        const mapping = { ...input().mapping, currency: 2 };
+        await expect(services.transfer.previewCsv(input({ mapping }))).resolves.toMatchObject({
+          ok: false,
+          error: { code: 'invalid-mapping' },
+        });
+      });
+    });
+
+    describe('undo', () => {
+      const imported = async () => {
+        const { batchId } = unwrap(await services.transfer.importCsv(input()));
+        if (!batchId) throw new Error('No batch');
+        return batchId;
+      };
+
+      it('removes the batch and nothing else, and the file can come back', async () => {
+        const typed = unwrap(
+          await services.ledger.recordExpense({ accountId, amount: '1.00', description: 'Typed' }),
+        );
+        const batchId = await imported();
+        const first = unwrap(await services.transfer.undoImport(batchId));
+        expect(first).toEqual({ removed: 4, kept: [] });
+        expect((await services.ledger.listTransactions({})).map(({ id }) => id)).toEqual([typed.id]);
+        await expect(driver.all('SELECT * FROM imported_rows')).resolves.toEqual([]);
+        expect(unwrap(await services.transfer.previewCsv(input()))).toMatchObject({ valid: 4 });
+      });
+
+      it('leaves an earlier batch alone', async () => {
+        const earlier = input({ text: 'Date,Description,Amount,Category\n2026-01-01,Old,-1.00,' });
+        unwrap(await services.transfer.importCsv(earlier));
+        unwrap(await services.transfer.undoImport(await imported()));
+        const left = await services.ledger.listTransactions({});
+        expect(left.map(({ description }) => description)).toEqual(['Old']);
+      });
+
+      it('gives no batch when nothing was imported', async () => {
+        await imported();
+        expect(unwrap(await services.transfer.importCsv(input())).batchId).toBeNull();
+      });
+
+      it('refuses a batch it does not know', async () => {
+        await expect(services.transfer.undoImport('nope')).resolves.toMatchObject({
+          ok: false,
+          error: { code: 'not-found' },
+        });
+      });
+
+      const splitSalary = async () => {
+        const savings = unwrap(
+          await services.ledger.createAccount({
+            name: 'Savings',
+            type: 'Bank',
+            currencyCode: 'USD',
+            openingBalance: '0',
+          }),
+        ).id;
+        const structure = unwrap(
+          await services.split.createStructure({
+            name: 'All',
+            lines: [{ label: 'Save', targetAccountId: savings, percentage: null, isRemainder: true }],
+          }),
+        );
+        const [salary] = await services.ledger.listTransactions({ kind: 'income' });
+        return unwrap(
+          await services.split.applyStructure({
+            transactionId: salary.id,
+            structureId: structure.id,
+          }),
+        );
+      };
+
+      it('keeps a row a split depends on, reports it, and removes the rest', async () => {
+        const batchId = await imported();
+        await splitSalary();
+        const report = unwrap(await services.transfer.undoImport(batchId));
+        expect(report.removed).toBe(3);
+        expect(report.kept).toEqual([
+          { description: 'Salary', reason: expect.stringMatching(/split/) },
+        ]);
+        const left = await services.ledger.listTransactions({});
+        expect(left.map(({ description }) => description)).toEqual(['Salary']);
+        await expect(driver.all('SELECT * FROM split_runs')).resolves.toHaveLength(1);
+      });
+
+      it('rolls every row back when one fails while deleting', async () => {
+        const batchId = await imported();
+        const before = await snapshot();
+        await driver.run(`
+          CREATE TRIGGER refuse_mystery BEFORE DELETE ON transactions
+          WHEN OLD.description = 'Mystery'
+          BEGIN SELECT RAISE(ABORT, 'refused'); END
+        `);
+        await expect(services.transfer.undoImport(batchId)).rejects.toThrow('refused');
+        await driver.run('DROP TRIGGER refuse_mystery');
+        expect(await snapshot()).toBe(before);
+      });
     });
 
     it('refuses an archived account', async () => {
@@ -377,6 +623,18 @@ describe('transfer service', () => {
       expect(all).toHaveLength(3);
       const one = await rows({ accountId: savings });
       expect(one).toHaveLength(2);
+    });
+
+    it('reads a year below 100 as written, not as 19xx', async () => {
+      unwrap(
+        await services.ledger.recordExpense({
+          accountId,
+          amount: '1.00',
+          occurredAt: '1960-06-15T12:00:00.000Z',
+        }),
+      );
+      expect(await rows({ to: '0099-12-31' })).toHaveLength(1);
+      expect(await rows({ from: '0050-01-01' })).toHaveLength(2);
     });
 
     it('limits to a range, both ends included', async () => {

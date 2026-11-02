@@ -6,7 +6,7 @@ import { foldCase } from '@/features/rules/domain/message';
 import { err, ok, type Result } from '@/shared/result';
 
 import { parseCsv, writeCsv, type CsvRow, type CsvSeparator } from '../domain/csv';
-import { CSV_HEADER, exportRows } from '../domain/csv-export';
+import { CSV_HEADER, exportRows, isAllAccountsExport } from '../domain/csv-export';
 import {
   readRow,
   rowFingerprint,
@@ -23,6 +23,7 @@ export const MAX_EXPORT_CHARS = 200_000;
 const MAX_NEW_CATEGORIES = 100;
 /** Noon, like every other date-only entry: it exists on every day under daylight saving. */
 const NOON = 12;
+const PREVIEW_ROWS = 5;
 
 export type UnknownCategories =
   | { readonly action: 'create' }
@@ -41,17 +42,39 @@ export type CsvImportInput = {
 export type RowFailure = { readonly line: number; readonly reason: string };
 export type NewCategory = { readonly name: string; readonly kind: RowKind };
 
+export type PreviewRow = {
+  readonly day: string;
+  readonly kind: RowKind;
+  /** Exact and unsigned: the kind holds the direction. */
+  readonly amount: string;
+  readonly description: string;
+};
+
+/** The figures cover only what would be imported, not duplicates or invalid rows. */
 export type CsvPreview = {
   readonly valid: number;
   readonly duplicates: number;
   readonly invalid: readonly RowFailure[];
   readonly newCategories: readonly NewCategory[];
+  readonly currencyCode: string;
+  readonly firstRows: readonly PreviewRow[];
+  readonly range: { readonly from: string; readonly to: string } | null;
+  readonly moneyIn: string;
+  readonly moneyOut: string;
 };
 
 export type CsvReport = {
   readonly imported: number;
+  /** What `undoImport` takes. Null when nothing was imported. */
+  readonly batchId: string | null;
   readonly duplicates: number;
   readonly invalid: readonly RowFailure[];
+};
+
+export type UndoReport = {
+  readonly removed: number;
+  /** Rows another feature depends on. They stay, and each says why. */
+  readonly kept: readonly { readonly description: string; readonly reason: string }[];
 };
 
 export type CsvExportInput = {
@@ -73,6 +96,7 @@ type PlannedRow = {
 
 type Plan = {
   readonly accountId: string;
+  readonly currencyCode: string;
   readonly decimals: number;
   readonly rows: readonly PlannedRow[];
   readonly duplicates: number;
@@ -86,10 +110,10 @@ class BatchRefused extends Error {}
 const categoryKey = (kind: RowKind, name: string) => `${kind}\0${foldCase(name)}`;
 
 function checkMapping(mapping: CsvMapping, columns: number): Result<void, TransferError> {
-  const { amount, date, description, category } = mapping;
+  const { amount, date, description, category, currency } = mapping;
   const amounts = amount.mode === 'single' ? [amount.column] : [amount.debit, amount.credit];
   const named = [date, ...amounts];
-  const used = [...named, description, category].filter((column) => column !== null);
+  const used = [...named, description, category, currency].filter((column) => column !== null);
   if (used.some((column) => !Number.isInteger(column) || column < 0 || column >= columns)) {
     return err(transferError('invalid-mapping', 'Choose columns that exist in this file.'));
   }
@@ -99,10 +123,20 @@ function checkMapping(mapping: CsvMapping, columns: number): Result<void, Transf
   return ok(undefined);
 }
 
-function categoryResolver(
-  repositoryCategories: Awaited<ReturnType<TransferRepositories['categories']['list']>>,
-  policy: UnknownCategories,
-) {
+type Categories = Awaited<ReturnType<TransferRepositories['categories']['list']>>;
+
+/** A fallback can go stale behind the form, and only the rows that need it would notice. */
+function checkFallbacks(categories: Categories, policy: UnknownCategories) {
+  if (policy.action !== 'fallback') return ok(undefined);
+  const fits = (id: string | null, wanted: RowKind) =>
+    id === null ||
+    categories.some((item) => item.id === id && item.kind === wanted && !item.archived);
+  return fits(policy.income, 'income') && fits(policy.expense, 'expense')
+    ? ok(undefined)
+    : err(transferError('invalid-mapping', 'Choose a fallback category that is still active.'));
+}
+
+function categoryResolver(repositoryCategories: Categories, policy: UnknownCategories) {
   const named = new Map<string, typeof repositoryCategories>();
   for (const category of repositoryCategories) {
     const key = categoryKey(category.kind, category.name);
@@ -151,19 +185,25 @@ async function planImport(
   }
   const currency = await repositories.currencies.get(account.currencyCode);
   if (!currency) return err(transferError('not-found', `Unknown currency ${account.currencyCode}.`));
+  if (isAllAccountsExport(parsed)) {
+    const message =
+      'This is a MoneyForge export of all accounts, so its rows belong to several accounts. ' +
+      'Export one account and import that file.';
+    return err(transferError('mixed-accounts', message));
+  }
   const columns = parsed[0]?.cells.length ?? 0;
   const checked = checkMapping(mapping, columns);
   if (!checked.ok) return checked;
 
-  const { resolve, newCategories } = categoryResolver(
-    await repositories.categories.list(),
-    unknownCategories,
-  );
+  const categories = await repositories.categories.list();
+  const fallbacks = checkFallbacks(categories, unknownCategories);
+  if (!fallbacks.ok) return fallbacks;
+  const { resolve, newCategories } = categoryResolver(categories, unknownCategories);
   const invalid: RowFailure[] = [];
   const candidates: PlannedRow[] = [];
   const repeats = new Map<string, number>();
   for (const csvRow of parsed.slice(hasHeader ? 1 : 0)) {
-    const row = readRow(csvRow, mapping, columns, currency.decimals);
+    const row = readRow(csvRow, mapping, columns, currency);
     const category = row.ok ? resolve(row.value) : row;
     if (!row.ok || !category.ok) {
       const reason = category.ok ? 'This row cannot be read.' : category.error;
@@ -187,6 +227,7 @@ async function planImport(
   );
   return ok({
     accountId,
+    currencyCode: currency.code,
     decimals: currency.decimals,
     rows,
     duplicates: candidates.length - rows.length,
@@ -195,9 +236,19 @@ async function planImport(
   });
 }
 
+/** `Date`'s constructor reads a year below 100 as 19xx, so the year is set on its own. */
+function localMoment(day: string, ...time: [number, number, number, number]): Date {
+  const [year, month, date] = day.split('-').map(Number);
+  const moment = new Date(0);
+  moment.setFullYear(year, month - 1, date);
+  moment.setHours(...time);
+  return moment;
+}
+
 async function writePlan(
   repositories: TransferRepositories,
   { accountId, decimals, rows, newCategories }: Plan,
+  batchId: string,
   generateId: () => string,
 ): Promise<void> {
   const created = new Map<string, string>();
@@ -207,8 +258,7 @@ async function writePlan(
     created.set(key, id);
   }
   for (const { row, fingerprint, category } of rows) {
-    const [year, month, date] = row.day.split('-').map(Number);
-    const occurredAt = new Date(year, month - 1, date, NOON).toISOString();
+    const occurredAt = localMoment(row.day, NOON, 0, 0, 0).toISOString();
     const transaction = await buildEntry(
       repositories,
       {
@@ -227,24 +277,38 @@ async function writePlan(
     );
     if (!transaction.ok) throw new BatchRefused(transaction.error.message);
     await repositories.journal.save(transaction.value);
-    await repositories.importedRows.save(fingerprint, transaction.value.id);
+    await repositories.importedRows.save(fingerprint, transaction.value.id, batchId);
   }
 }
 
-const previewOf = ({ rows, duplicates, invalid, newCategories }: Plan): CsvPreview => ({
-  valid: rows.length,
-  duplicates,
-  invalid,
-  newCategories: [...newCategories.values()],
-});
-
-function dayBound(day: string, endOfDay: boolean): string {
-  const [year, month, date] = day.split('-').map(Number);
-  const moment = endOfDay
-    ? new Date(year, month - 1, date, 23, 59, 59, 999)
-    : new Date(year, month - 1, date);
-  return moment.toISOString();
+function previewOf(plan: Plan): CsvPreview {
+  const { rows, duplicates, invalid, newCategories, currencyCode, decimals } = plan;
+  const total = (wanted: RowKind) =>
+    formatDecimal(
+      rows.reduce((sum, { row }) => (row.kind === wanted ? sum + row.minor : sum), 0n),
+      decimals,
+    );
+  const days = rows.map(({ row }) => row.day).sort();
+  return {
+    valid: rows.length,
+    duplicates,
+    invalid,
+    newCategories: [...newCategories.values()],
+    currencyCode,
+    firstRows: rows.slice(0, PREVIEW_ROWS).map(({ row: { day, kind, minor, description } }) => ({
+      day,
+      kind,
+      amount: formatDecimal(minor, decimals),
+      description,
+    })),
+    range: days.length > 0 ? { from: days[0], to: days[days.length - 1] } : null,
+    moneyIn: total('income'),
+    moneyOut: total('expense'),
+  };
 }
+
+const dayBound = (day: string, endOfDay: boolean) =>
+  (endOfDay ? localMoment(day, 23, 59, 59, 999) : localMoment(day, 0, 0, 0, 0)).toISOString();
 
 export function createTransferService({ store, generateId, loadSecret }: TransferDeps) {
   // Kept in memory only, like a shared message: a route param would outlive the import.
@@ -281,9 +345,11 @@ export function createTransferService({ store, generateId, loadSecret }: Transfe
         return await store.atomic(async (repositories) => {
           const plan = await planImport(repositories, input, parsed.value, secret);
           if (!plan.ok) return plan;
-          await writePlan(repositories, plan.value, generateId);
+          const batchId = generateId();
+          await writePlan(repositories, plan.value, batchId, generateId);
           const { rows, duplicates, invalid } = plan.value;
-          return ok({ imported: rows.length, duplicates, invalid });
+          const imported = rows.length;
+          return ok({ imported, batchId: imported > 0 ? batchId : null, duplicates, invalid });
         });
       } catch (error) {
         if (!(error instanceof BatchRefused)) throw error;
@@ -291,6 +357,33 @@ export function createTransferService({ store, generateId, loadSecret }: Transfe
         return err(transferError('import-failed', message));
       }
     },
+
+    /**
+     * One write, so a failure leaves the whole batch in place. A row a guard refuses stays and is
+     * reported: nothing here confirms on a person's behalf, so a split is never cancelled by it.
+     * Categories the import created stay too, since other entries may use them by now.
+     */
+    undoImport: (batchId: string): Promise<Result<UndoReport, TransferError>> =>
+      store.atomic(async ({ importedRows, journal, changeGuard }) => {
+        const ids = await importedRows.listBatch(batchId);
+        if (ids.length === 0) {
+          return err(transferError('not-found', 'Nothing from this import is left to remove.'));
+        }
+        const kept: { description: string; reason: string }[] = [];
+        let removed = 0;
+        for (const id of ids) {
+          const transaction = await journal.get(id);
+          if (!transaction) continue;
+          const allowed = await changeGuard.beforeDelete(transaction, {});
+          if (allowed.ok) {
+            await journal.remove(id);
+            removed += 1;
+          } else {
+            kept.push({ description: transaction.description, reason: allowed.error.message });
+          }
+        }
+        return ok({ removed, kept });
+      }),
 
     exportCsv: async ({
       accountId,

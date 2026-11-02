@@ -29,6 +29,9 @@ describe('parseDay', () => {
     ['04/03/2026', 'ymd'],
     ['2026-03-04Z', 'ymd'],
     ['', 'ymd'],
+    ['1899-12-31', 'ymd'],
+    ['0050-01-01', 'ymd'],
+    ['31/12/0099', 'dmy'],
   ] as const)('refuses %j as %s, never picking another reading', (text, format) => {
     expect(parseDay(text, format)).toBeNull();
   });
@@ -63,6 +66,14 @@ describe('parseAmount', () => {
   ] as const)('refuses %s instead of guessing', (text, format, decimals) => {
     expect(parseAmount(text, format, decimals)).toMatchObject({ ok: false });
   });
+
+  it('caps the length, whatever the digits', () => {
+    expect(parseAmount('1'.repeat(64), DOT, 2)).toMatchObject({ ok: true });
+    expect(parseAmount('1'.repeat(65), DOT, 2)).toEqual({
+      ok: false,
+      error: expect.stringMatching(/64 characters/),
+    });
+  });
 });
 
 describe('readRow', () => {
@@ -71,6 +82,7 @@ describe('readRow', () => {
     description: 1,
     category: 3,
     amount: { mode: 'single', column: 2, positive: 'income' },
+    currency: null,
     dateFormat: 'ymd',
     numberFormat: DOT,
   };
@@ -80,7 +92,7 @@ describe('readRow', () => {
     amount: { mode: 'split', debit: 2, credit: 3 },
   };
   const read = (mapping: CsvMapping, cells: string[], columns = 4) =>
-    readRow({ line: 2, cells }, mapping, columns, 2);
+    readRow({ line: 2, cells }, mapping, columns, { code: 'USD', decimals: 2 });
 
   it('takes income from a positive amount and expense from a negative one', () => {
     expect(read(single, ['2026-01-02', ' Pay\n day ', '10.50', ' Salary '])).toEqual({

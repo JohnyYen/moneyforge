@@ -47,7 +47,7 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `c1cd99e`.
+Review base for the next candidate: `a3af194`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
@@ -64,6 +64,7 @@ Review base for the next candidate: `c1cd99e`.
 - [x] T7a.1 T7a hardening: verified findings on stream edits, coverage by amount and current transaction state, overdue expenses, budget double counts, late payments, projection notices, link failures, and report figures. Commit: `df4f609`.
 - [x] T7b On-chain balances: read-only balances by public address. Commits: `abdcd66` (T7a.1 advisory), `c717c4b`, and the `feat(onchain): add the on-chain screens` commit that records this line.
 - [x] T8a CSV and rule packs: T7b advisories, CSV import and export, shareable rule packs, Data screen. Rule packs exclude samples. Commits: `c383635` (advisories), `d6144b0`, and the `feat(rules): add shareable rule packs` commit that records this line.
+- [x] T8a.1 T8a hardening: verified findings on packs taking over a source, rule selection stopping at a failure, CSV preview and undo, export round trips, all-accounts files, packs storing personal senders, dates, caps, fallbacks, control characters, and semicolon formulas. Commits: `c20c997`, and the `fix(transfer): show what an import will do, undo it, and survive a round trip` commit that records this line.
 - [ ] T8b Backup: encrypted export and import. Backup must carry `rules.dedup_secret` and `imported_rows`, or every stored dedup key and import fingerprint stops matching after a restore. A chain endpoint may hold an API key, so a plain export must leave `onchain_chains.endpoint` out or say so.
 - [ ] T8c Release: CI, docs, store listing, privacy policy.
 
@@ -496,7 +497,34 @@ T8a evidence:
   - The rule's `currencyCode` is left out of packs, because a stored value must equal the account's currency, so null means the same. Slots are derived from the rules, and export names them `Account 1` and `Income category 1`, because an account name can hold card digits. Templates and sender names are exported as written, with a warning to read them.
   - A rule counts as known by source, template, kind, and number format. An existing source keeps its own name, channel, and enabled state. A new source starts enabled, so the sender joins the allowlist on confirmation, and the preview says so. `onSourcesChanged` runs after the write.
   - Slot mappings are `Map`s, because a slot name comes from the pack and may be `__proto__`. Rule packs depend on no transfer code; `shareText` lives in `src/shared/ui`.
+- review: medium, granted by the user, native review refused with lens_context_budget_exceeded; independent verifier found 3 majors, fixed in T8a.1
+
+T8a.1 done. Route: delegated direct; 2+ non-trivial files. Migration 007 was edited in place because it is unreleased: `imported_rows` gained `batch_id` and an index.
+
+T8a.1 evidence:
+
+- RED: 7 suites, 72 failed of 276.
+- GREEN: `pnpm test`: 71 suites, 1666 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exit 0, one 3.7 MB Hermes bundle.
+- The transfer suites also passed with `TZ` set to `Pacific/Auckland`, `Pacific/Pago_Pago`, and `America/New_York`, 173 of 173 each.
+- Mutations, each failing tests: undo confirming for the person (1), no priority shift (2), new sources on (4), capture told about sources left off (1), no apostrophe fold (1), any export refused (2), no change guard on the transfer store (1).
+- About 1080 changed lines, about 560 of them tests.
+- Not run: no device run, Gradle build, or screen rendering test. The new preview lines, toggles, and undo button are compiled, never executed. `previewLines` and `undoLines` are tested on their own. The export screen warning is copy, with no test. Migration 007 ran on `node:sqlite` only.
+- Decisions:
+  - Supersedes T8a: a new pack source starts off, not enabled. `enabledSenders` holds the normalized senders a person turned on in the preview. Capture is told only when one was.
+  - Supersedes T4: `selectRule` no longer stops at a fitting rule that fails. The first rule that works decides, so a looser rule may now read an amount a stricter one refused. With none, the first failure stays as the inbox note.
+  - New pack rules shift below the lowest stored rule as a group, not each clamped, so their order holds. A tie counts as taking over. Rules already lower stay. The preview uses the same code as the import, so it shows the final priority. It lists only rules that would be added.
+  - Undo deletes through the same guards as a manual delete, wired from `transactionGuard`, which is now a required argument of the transfer store. It never passes `confirmed`, so a row with a split stays and is reported, and can be deleted by hand. Categories the import created stay.
+  - Undo is offered only on the import screen, until the next import or until it is used. `batch_id` persists, but nothing lists past batches, so leaving the screen loses the button. Listing them needs an import time, and is a follow-up if wanted.
+  - An all-accounts export is told from a one-account export by its rows, since the header is the same: the exact header plus two or more values in the account column. An all-accounts export that only ever touched one account passes, and is safe for the same reason.
+  - A mapped currency column compares case-insensitively, and an empty cell is invalid.
+  - Templates with a direction mark are refused in packs, including on export. An Arabic bank's template that holds U+200F must lose it first.
+  - The control set also covers U+2029, U+200E, and all C1 controls, since they sit beside the ones asked for.
+  - A category exported with a leading apostrophe still imports with it, as a name match. Only `rowIdentity` folds.
+  - The batch test now forces a failure with a SQL trigger, because checking fallbacks in the plan removed the only way to fail mid-write. `BatchRefused` stays as a defensive path.
 
 ## Next step
 
-T8b: encrypted backup, carrying `rules.dedup_secret` and `imported_rows`. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, and the Data screens, including `Share` with a large CSV.
+T8b: encrypted backup, carrying `rules.dedup_secret` and `imported_rows`, including `batch_id`. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, and the Data screens, including `Share` with a large CSV.

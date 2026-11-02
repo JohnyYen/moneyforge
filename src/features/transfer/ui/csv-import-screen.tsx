@@ -25,9 +25,11 @@ import {
   emptyCsvDraft,
   failureLines,
   NUMBER_OPTIONS,
+  previewLines,
   reportLabel,
   SEPARATOR_OPTIONS,
   toCsvInput,
+  undoLines,
   type CsvDraft,
 } from './transfer-model';
 
@@ -53,6 +55,9 @@ export function CsvImportScreen() {
   }));
   const [preview, setPreview] = useState<CsvPreview | null>(null);
   const [report, setReport] = useState<string | null>(null);
+  const [undone, setUndone] = useState<readonly string[]>([]);
+  /** Outlives edits to the form, which only change the next import. */
+  const [batchId, setBatchId] = useState<string | null>(null);
 
   /** Any change leaves the preview behind, so what is confirmed is always what was shown. */
   const change = (patch: Partial<CsvDraft>) => {
@@ -73,6 +78,16 @@ export function CsvImportScreen() {
     (done) => {
       setReport(reportLabel(done));
       setPreview(null);
+      setBatchId(done.batchId);
+      setUndone([]);
+    },
+  );
+  const undo = useSubmit(
+    (batch: string) => transfer.undoImport(batch),
+    (done) => {
+      setBatchId(null);
+      setReport(null);
+      setUndone(undoLines(done));
     },
   );
 
@@ -148,6 +163,12 @@ export function CsvImportScreen() {
               options={optional}
               value={draft.categoryColumn}
               onChange={(categoryColumn) => change({ categoryColumn })}
+            />
+            <ChoiceChips
+              label="Currency"
+              options={optional}
+              value={draft.currencyColumn}
+              onChange={(currencyColumn) => change({ currencyColumn })}
             />
             <ChoiceChips
               label="Amounts are in"
@@ -234,8 +255,19 @@ export function CsvImportScreen() {
               </>
             ) : null}
 
-            <ErrorBanner message={check.error ?? commit.error} />
+            <ErrorBanner message={check.error ?? commit.error ?? undo.error} />
             {report ? <Notice>{report}</Notice> : null}
+            {undone.map((line) => (
+              <Muted key={line}>{line}</Muted>
+            ))}
+            {batchId ? (
+              <Button
+                label="Undo this import"
+                variant="secondary"
+                disabled={undo.submitting}
+                onPress={() => void undo.submit(batchId)}
+              />
+            ) : null}
             <Button
               label="Preview"
               variant={preview ? 'secondary' : 'primary'}
@@ -248,6 +280,9 @@ export function CsvImportScreen() {
                 <Notice>
                   {`${preview.valid} to import, ${preview.duplicates} already imported, ${preview.invalid.length} invalid.`}
                 </Notice>
+                {previewLines(preview).map((line, index) => (
+                  <Muted key={index}>{line}</Muted>
+                ))}
                 {preview.newCategories.length > 0 ? (
                   <Muted>
                     {`New categories: ${preview.newCategories.map(({ name }) => name).join(', ')}.`}

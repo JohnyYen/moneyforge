@@ -1,4 +1,7 @@
-import { createLedgerRepositories } from '@/features/ledger/infrastructure/sqlite-ledger-store';
+import {
+  createLedgerRepositories,
+  type ChangeGuardFactory,
+} from '@/features/ledger/infrastructure/sqlite-ledger-store';
 import type { SqlExecutor } from '@/shared/persistence/sql-driver';
 
 import type {
@@ -25,17 +28,29 @@ function createImportedRowRepository(sql: SqlExecutor): ImportedRowRepository {
       }
       return known;
     },
-    save: (fingerprint, transactionId) =>
-      sql.run('INSERT INTO imported_rows (fingerprint, transaction_id) VALUES (?, ?)', [
+    save: (fingerprint, transactionId, batchId) =>
+      sql.run('INSERT INTO imported_rows (fingerprint, transaction_id, batch_id) VALUES (?, ?, ?)', [
         fingerprint,
         transactionId,
+        batchId,
       ]),
+    listBatch: async (batchId) => {
+      const rows = await sql.all<{ transaction_id: string }>(
+        'SELECT transaction_id FROM imported_rows WHERE batch_id = ?',
+        [batchId],
+      );
+      return rows.map(({ transaction_id: id }) => id);
+    },
   };
 }
 
-export function createSqliteTransferStore(driver: SqlExecutor): TransferStore {
+/** The guard is required, because undoing an import deletes transactions other features use. */
+export function createSqliteTransferStore(
+  driver: SqlExecutor,
+  changeGuard: ChangeGuardFactory,
+): TransferStore {
   const repositories = (sql: SqlExecutor): TransferRepositories => ({
-    ...createLedgerRepositories(sql),
+    ...createLedgerRepositories(sql, changeGuard),
     importedRows: createImportedRowRepository(sql),
   });
   return {

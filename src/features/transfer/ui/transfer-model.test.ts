@@ -2,8 +2,10 @@ import {
   columnChoices,
   emptyCsvDraft,
   failureLines,
+  previewLines,
   reportLabel,
   toCsvInput,
+  undoLines,
   type CsvDraft,
 } from './transfer-model';
 
@@ -90,8 +92,50 @@ describe('report text', () => {
   });
 
   it('says what an import did', () => {
-    expect(reportLabel({ imported: 2, duplicates: 1, invalid: [{ line: 1, reason: 'x' }] })).toBe(
+    expect(reportLabel({ imported: 2, batchId: 'b', duplicates: 1, invalid: [{ line: 1, reason: 'x' }] })).toBe(
       'Imported 2. Skipped 1 duplicate and 1 invalid.',
     );
+  });
+});
+
+describe('previewLines', () => {
+  const preview = {
+    valid: 2,
+    duplicates: 0,
+    invalid: [],
+    newCategories: [],
+    currencyCode: 'USD',
+    firstRows: [
+      { day: '2026-01-02', kind: 'income', amount: '1000.50', description: 'Salary' },
+      { day: '2026-01-03', kind: 'expense', amount: '3.25', description: '' },
+    ],
+    range: { from: '2026-01-02', to: '2026-01-03' },
+    moneyIn: '1000.50',
+    moneyOut: '3.25',
+  } as const;
+
+  it('shows the dates, the totals, and the rows as they were read', () => {
+    expect(previewLines(preview)).toEqual([
+      'From 2026-01-02 to 2026-01-03. In 1000.50 USD, out 3.25 USD.',
+      '2026-01-02  In 1000.50 USD  Salary',
+      '2026-01-03  Out 3.25 USD  No description',
+    ]);
+  });
+
+  it('shows nothing with no rows to import', () => {
+    expect(previewLines({ ...preview, firstRows: [], range: null })).toEqual([]);
+  });
+
+  it('says when rows are left out of the list', () => {
+    expect(previewLines({ ...preview, valid: 7 }).at(-1)).toBe('And 5 more.');
+  });
+});
+
+describe('undoLines', () => {
+  it('reports what went and what stayed, with why', () => {
+    expect(undoLines({ removed: 3, kept: [] })).toEqual(['Removed 3 rows.']);
+    expect(
+      undoLines({ removed: 1, kept: [{ description: 'Salary', reason: 'It has a split.' }] }),
+    ).toEqual(['Removed 1 row. 1 could not be removed.', 'Salary: It has a split.']);
   });
 });

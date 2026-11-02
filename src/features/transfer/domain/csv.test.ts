@@ -1,4 +1,13 @@
-import { MAX_CSV_CELL, MAX_CSV_CHARS, MAX_CSV_ROWS, neutralizeFormula, parseCsv, writeCsv } from './csv';
+import {
+  foldNeutralized,
+  MAX_CSV_CELL,
+  MAX_CSV_CHARS,
+  MAX_CSV_COLUMNS,
+  MAX_CSV_ROWS,
+  neutralizeFormula,
+  parseCsv,
+  writeCsv,
+} from './csv';
 
 const cells = (text: string, separator: ',' | ';' | '\t' = ',') => {
   const parsed = parseCsv(text, separator);
@@ -58,6 +67,13 @@ describe('parseCsv', () => {
     expect(parseCsv(`"${'a'.repeat(MAX_CSV_CELL + 1)}"`, ',')).toMatchObject(refused);
     expect(parseCsv(','.repeat(100), ',')).toMatchObject(refused);
   });
+
+  it('counts the last cell of a row against the column cap', () => {
+    const refused = { ok: false, error: { code: 'too-large' } };
+    expect(parseCsv(','.repeat(MAX_CSV_COLUMNS - 1), ',')).toMatchObject({ ok: true });
+    expect(parseCsv(','.repeat(MAX_CSV_COLUMNS), ',')).toMatchObject(refused);
+    expect(parseCsv(`${','.repeat(MAX_CSV_COLUMNS)}\nnext`, ',')).toMatchObject(refused);
+  });
 });
 
 describe('writeCsv', () => {
@@ -83,7 +99,29 @@ describe('neutralizeFormula', () => {
     expect(neutralizeFormula(text)).toBe(`'${text}`);
   });
 
-  it.each(['Coffee', 'A = B', '12.50', "'quoted", ''])('leaves %j alone', (text) => {
+  it.each(['Coffee', 'A = B', '12.50', "'quoted", '', 'a; b', 'a;b=1'])('leaves %j alone', (text) => {
     expect(neutralizeFormula(text)).toBe(text);
+  });
+
+  it.each([
+    ['a;=1+1', "a;'=1+1"],
+    ['a; +1+1', "a; '+1+1"],
+    ['a;-1;@SUM(A1)', "a;'-1;'@SUM(A1)"],
+    ['=a;=b', "'=a;'=b"],
+  ])('stops %j from becoming a cell under a semicolon separator', (text, safe) => {
+    expect(neutralizeFormula(text)).toBe(safe);
+  });
+});
+
+describe('foldNeutralized', () => {
+  it.each(['=1+1', '-5 apples', '   =1+1', '\t=1+1', 'a;=1+1', 'a; -1;@b', '=a;=b', 'Coffee'])(
+    'undoes what neutralizing did to %j',
+    (text) => {
+      expect(foldNeutralized(neutralizeFormula(text))).toBe(text.replace(/^[\t ]+/, ''));
+    },
+  );
+
+  it.each(["'quoted", "it's", "a;'b"])('leaves the apostrophe in %j', (text) => {
+    expect(foldNeutralized(text)).toBe(text);
   });
 });
