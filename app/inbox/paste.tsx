@@ -1,1 +1,1 @@
-export { PasteScreen as default } from '@/features/rules/ui/paste-screen';
+export { PasteWithCsv as default } from '@/features/transfer/ui/paste-with-csv';

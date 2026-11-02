@@ -33,6 +33,8 @@ import {
 import { createRulesService } from '@/features/rules/application/rules-service';
 import { createSqliteRuleStore } from '@/features/rules/infrastructure/sqlite-rule-store';
 import { createSplitService } from '@/features/split/application/split-service';
+import { createTransferService } from '@/features/transfer/application/transfer-service';
+import { createSqliteTransferStore } from '@/features/transfer/infrastructure/sqlite-transfer-store';
 import {
   createSqliteSplitStore,
   splitChangeGuard,
@@ -106,6 +108,13 @@ export function createAppServices(deps: {
       clock,
       generateId,
       client: deps.onChainClient ?? absentOnChainClient,
+    }),
+    transfer: createTransferService({
+      store: createSqliteTransferStore(driver),
+      clock,
+      generateId,
+      // One secret to carry through a backup, or stored keys would stop matching.
+      loadSecret: rules.loadDedupSecret,
     }),
   };
 }

@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { ok } from '@/shared/result';
 import {
@@ -28,6 +28,7 @@ function PasteForm({
   error,
   submitting,
   onSubmit,
+  sharedAction,
 }: {
   sources: readonly MessageSource[];
   sharedText: string | null;
@@ -35,6 +36,7 @@ function PasteForm({
   error: string | null;
   submitting: boolean;
   onSubmit: (source: MessageSource, body: string) => void;
+  sharedAction: ReactNode;
 }) {
   const [sourceId, setSourceId] = useState(sources.length === 1 ? sources[0].id : null);
   const [body, setBody] = useState(sharedText ?? '');
@@ -61,11 +63,17 @@ function PasteForm({
         disabled={submitting || !source || !body.trim()}
         onPress={() => source && onSubmit(source, body)}
       />
+      {sharedAction}
     </Screen>
   );
 }
 
-export function PasteScreen() {
+/** `renderSharedAction` lets another feature offer what shared text could be instead. */
+export function PasteScreen({
+  renderSharedAction,
+}: {
+  renderSharedAction?: (text: string) => ReactNode;
+}) {
   const rules = useRules();
   const capture = useCapture();
   const router = useRouter();
@@ -75,6 +83,7 @@ export function PasteScreen() {
   const load = useCallback(() => rules.listSources(), [rules]);
   const { state, reload } = useFocusQuery(load);
   const [notice, setNotice] = useState<string | null>(null);
+  const sharedAction = sharedText ? renderSharedAction?.(sharedText) : null;
   const add = useSubmit(
     async ({ source, body }: { source: MessageSource; body: string }) =>
       ok(
@@ -108,6 +117,7 @@ export function PasteScreen() {
                     : 'Add a source before pasting a message.'
                 }
               />
+              {sharedAction}
             </Screen>
           );
         }
@@ -119,6 +129,7 @@ export function PasteScreen() {
             error={add.error}
             submitting={add.submitting}
             onSubmit={(source, body) => void add.submit({ source, body })}
+            sharedAction={sharedAction}
           />
         );
       }}

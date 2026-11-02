@@ -1,6 +1,4 @@
-import { hmac } from '@noble/hashes/hmac';
-import { sha256 } from '@noble/hashes/sha2';
-import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
+import { keyedHash } from '@/shared/keyed-hash';
 
 export const MESSAGE_CHANNELS = ['sms', 'paste'] as const;
 export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
@@ -44,10 +42,6 @@ export function acceptsChannel(
 ): boolean {
   return channel === 'paste' || source.channel === 'sms';
 }
-
-/** The label keeps a body and a reference with the same text from sharing a key. */
-const keyedHash = (label: string, text: string, secret: string) =>
-  bytesToHex(hmac(sha256, utf8ToBytes(secret), utf8ToBytes(`${label}\0${text}`)));
 
 /** A dedup key that outlives the erased body and reveals nothing without the install's secret. */
 export function hashBody(body: string, secret: string): string {

@@ -53,6 +53,9 @@ export default function RootLayout() {
             <Stack.Screen name="onchain/token" options={{ title: 'Token' }} />
             <Stack.Screen name="onchain/[id]/index" options={{ title: 'Address' }} />
             <Stack.Screen name="onchain/[id]/edit" options={{ title: 'Edit address' }} />
+            <Stack.Screen name="data/index" options={{ title: 'Data' }} />
+            <Stack.Screen name="data/csv-import" options={{ title: 'Import CSV' }} />
+            <Stack.Screen name="data/csv-export" options={{ title: 'Export CSV' }} />
             <Stack.Screen name="inbox/index" options={{ title: 'Inbox' }} />
             <Stack.Screen name="inbox/paste" options={{ title: 'Paste a message' }} />
             <Stack.Screen name="inbox/[id]" options={{ title: 'Review message' }} />

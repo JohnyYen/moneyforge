@@ -7,6 +7,7 @@ import { PlanningContext } from '@/features/planning/ui/planning-context';
 import { CaptureContext } from '@/features/rules/ui/capture-context';
 import { RulesContext } from '@/features/rules/ui/rules-context';
 import { SplitContext } from '@/features/split/ui/split-context';
+import { TransferContext } from '@/features/transfer/ui/transfer-context';
 import { FailureState, LoadingState } from '@/shared/ui/primitives';
 import { messageOf } from '@/shared/ui/use-focus-query';
 
@@ -57,7 +58,9 @@ export function AppServicesProvider({ children }: { children: ReactNode }) {
             <PlanningContext.Provider value={state.services.planning}>
               <AssetsContext.Provider value={state.services.assets}>
                 <OnChainContext.Provider value={state.services.onchain}>
-                  {children}
+                  <TransferContext.Provider value={state.services.transfer}>
+                    {children}
+                  </TransferContext.Provider>
                 </OnChainContext.Provider>
               </AssetsContext.Provider>
             </PlanningContext.Provider>

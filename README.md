@@ -158,6 +158,16 @@ More, then On-chain balances, reads token balances by public address. MoneyForge
 - With a linked account, an address shows how the amount compares with the ledger, and a difference offers the reconcile form, filled in. Nothing is recorded until you press Reconcile. An account must be in a currency whose code is the token's symbol. An amount finer than the account's decimals is rounded down, and counts as a match when that is the only difference.
 - Public endpoints limit keyless requests, and TronGrid does so quickly. Point a chain at your own endpoint if a refresh is refused.
 
+## Data
+
+Under More, Data.
+
+CSV import reads pasted or shared text into one account. The person picks the separator, the columns, and the date and number formats, because `03/04` and `1.500` each have two readings. A row that does not fit is shown as invalid and is never guessed at. Nothing is written before the preview is confirmed. The valid rows then post in one atomic batch through the ledger, and a failure leaves nothing. Invalid and duplicate rows are skipped and reported.
+
+Each imported row keeps a keyed fingerprint of its account, day, kind, amount, and description, so importing a file again adds nothing. Identical rows in one file stay separate entries. Deleting a transaction releases its fingerprint, so that row can return.
+
+CSV export writes one row per account a transaction touched, with exact amounts. Text that a spreadsheet would run as a formula is neutralized with a leading apostrophe. It uses the system share sheet, so it carries text and refuses more than 200,000 characters rather than cutting it short.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).

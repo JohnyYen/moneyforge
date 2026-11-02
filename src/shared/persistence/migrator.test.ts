@@ -134,6 +134,7 @@ describe('upgrading a version 1 database', () => {
         { version: 4 },
         { version: 5 },
         { version: 6 },
+        { version: 7 },
       ],
     );
     await expect(driver.all('PRAGMA foreign_key_check')).resolves.toEqual([]);

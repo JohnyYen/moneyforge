@@ -13,6 +13,7 @@ export function MoreScreen() {
       <ListRow title="Categories" onPress={() => router.push('/categories')} />
       <ListRow title="Currencies" onPress={() => router.push('/currencies')} />
       <ListRow title="Exchange rates" onPress={() => router.push('/exchange-rates')} />
+      <ListRow title="Data" onPress={() => router.push('/data')} />
     </Screen>
   );
 }

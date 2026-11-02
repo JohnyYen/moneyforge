@@ -5,6 +5,7 @@ import { rulesMigration } from './003-rules';
 import { planningMigration } from './004-planning';
 import { assetsMigration } from './005-assets';
 import { onchainMigration } from './006-onchain';
+import { transferMigration } from './007-transfer';
 
 export const migrations: readonly Migration[] = [
   ledgerMigration,
@@ -13,4 +14,5 @@ export const migrations: readonly Migration[] = [
   planningMigration,
   assetsMigration,
   onchainMigration,
+  transferMigration,
 ];
