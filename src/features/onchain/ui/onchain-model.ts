@@ -39,8 +39,13 @@ export function reconcileTarget({
   return { id: account.id, counted: formatDecimal(comparison.counted, currency.decimals) };
 }
 
-export function refreshFailures(outcomes: readonly RefreshOutcome[]): string[] {
-  return outcomes.flatMap(({ label, error }) => (error ? [`${label}: ${error}`] : []));
+export type RefreshFailure = { readonly id: string; readonly message: string };
+
+/** Keyed by address, because labels repeat and so does the text of a failure. */
+export function refreshFailures(outcomes: readonly RefreshOutcome[]): RefreshFailure[] {
+  return outcomes.flatMap(({ id, label, error }) =>
+    error ? [{ id, message: `${label}: ${error}` }] : [],
+  );
 }
 
 export type WatchedDraft = {

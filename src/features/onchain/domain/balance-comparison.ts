@@ -29,8 +29,8 @@ export function compareBalance({
 
 const STALE_AFTER_MS = 60 * 60 * 1000;
 
-/** Past an hour a balance may have moved, and a shown value should say so. */
+/** Past an hour a balance may have moved. A time ahead of the clock proves nothing about age. */
 export function isStale(readAt: string, now: Date): boolean {
   const age = now.getTime() - new Date(readAt).getTime();
-  return !(age <= STALE_AFTER_MS);
+  return !(age >= 0 && age <= STALE_AFTER_MS);
 }

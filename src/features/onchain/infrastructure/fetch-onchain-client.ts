@@ -45,6 +45,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 type Reply = Result<unknown, OnChainError>;
 
+/** A key may sit in the endpoint's query, so the path goes before it. */
+function tronCallUrl(endpoint: string): string {
+  const [location] = endpoint.split('#');
+  const queryAt = location.indexOf('?');
+  const base = queryAt < 0 ? location : location.slice(0, queryAt);
+  const query = queryAt < 0 ? '' : location.slice(queryAt);
+  return `${base.replace(/\/+$/, '')}/wallet/triggerconstantcontract${query}`;
+}
+
 /**
  * Talks to a user's endpoint, so every answer is untrusted: it is checked by shape, its own text
  * never reaches a message, and a message names only the host, since a path may hold an API key.
@@ -190,7 +199,7 @@ export function createFetchOnChainClient({
     selector: string,
     parameter: string,
   ): Promise<Result<string, OnChainError>> {
-    const reply = await post(`${endpoint}/wallet/triggerconstantcontract`, {
+    const reply = await post(tronCallUrl(endpoint), {
       owner_address: address,
       contract_address: contract,
       function_selector: selector,

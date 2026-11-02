@@ -140,14 +140,32 @@ export function createSqliteOnChainRepository(sql: SqlExecutor): OnChainReposito
 
     removeWatched: (id) => sql.run('DELETE FROM onchain_watched_addresses WHERE id = ?', [id]),
 
-    saveRead: ({ id, tokenId, address }, contract, { amount, decimals, readAt }) =>
+    saveRead: ({ id, tokenId, address }, origin, { amount, decimals, readAt }, now) =>
       sql.run(
         `UPDATE onchain_watched_addresses
          SET last_amount = ?, last_decimals = ?, last_read_at = ?
          WHERE id = ? AND token_id = ? AND address = ?
-           AND (last_read_at IS NULL OR last_read_at <= ?)
-           AND EXISTS (SELECT 1 FROM onchain_tokens WHERE id = ? AND contract = ?)`,
-        [amount.toString(), decimals, readAt, id, tokenId, address, readAt, tokenId, contract],
+           AND (last_read_at IS NULL OR last_read_at <= ? OR last_read_at > ?)
+           AND EXISTS (
+             SELECT 1 FROM onchain_tokens AS token
+             JOIN onchain_chains AS chain ON chain.id = token.chain_id
+             WHERE token.id = ? AND token.contract = ?
+               AND chain.endpoint = ? AND chain.evm_chain_id IS ?
+           )`,
+        [
+          amount.toString(),
+          decimals,
+          readAt,
+          id,
+          tokenId,
+          address,
+          readAt,
+          now,
+          tokenId,
+          origin.contract,
+          origin.endpoint,
+          origin.evmChainId,
+        ],
       ),
 
     clearReads: (tokenId) =>
@@ -156,6 +174,14 @@ export function createSqliteOnChainRepository(sql: SqlExecutor): OnChainReposito
          SET last_amount = NULL, last_decimals = NULL, last_read_at = NULL
          WHERE token_id = ?`,
         [tokenId],
+      ),
+
+    clearChainReads: (chainId) =>
+      sql.run(
+        `UPDATE onchain_watched_addresses
+         SET last_amount = NULL, last_decimals = NULL, last_read_at = NULL
+         WHERE chain_id = ?`,
+        [chainId],
       ),
   };
 }

@@ -115,7 +115,15 @@ describe('refreshFailures', () => {
         { id: 'a', label: 'A', error: null },
         { id: 'b', label: 'B', error: 'Too slow.' },
       ]),
-    ).toEqual(['B: Too slow.']);
+    ).toEqual([{ id: 'b', message: 'B: Too slow.' }]);
+  });
+
+  it('keeps two addresses with the same label and failure apart', () => {
+    const failures = refreshFailures([
+      { id: 'a', label: 'Main', error: 'Too slow.' },
+      { id: 'b', label: 'Main', error: 'Too slow.' },
+    ]);
+    expect(new Set(failures.map(({ id }) => id)).size).toBe(2);
   });
 });
 

@@ -31,7 +31,10 @@ export function createCatalogUseCases({ store, generateId }: OnChainDeps) {
     listTokens: () => store.onchain.listTokens(),
     getToken: (id: string) => store.onchain.getToken(id),
 
-    /** The family of a saved chain stays, because its tokens and addresses are written for it. */
+    /**
+     * The family of a saved chain stays, because its tokens and addresses are written for it.
+     * A new endpoint or chain ID may be another network, so amounts read before go with it.
+     */
     saveChain: async (input: ChainInput): Promise<Result<Chain, OnChainError>> => {
       const clean = refuseSecrets(input.name, input.endpoint, input.evmChainId ?? '');
       if (!clean.ok) return clean;
@@ -40,7 +43,12 @@ export function createCatalogUseCases({ store, generateId }: OnChainDeps) {
         if (input.id && !existing) return notFound('Chain');
         const id = input.id ?? generateId();
         const chain = validateChain({ ...input, id, family: existing?.family ?? input.family });
-        if (chain.ok) await onchain.saveChain(chain.value);
+        if (!chain.ok) return chain;
+        await onchain.saveChain(chain.value);
+        const { endpoint, evmChainId } = chain.value;
+        if (existing && (existing.endpoint !== endpoint || existing.evmChainId !== evmChainId)) {
+          await onchain.clearChainReads(id);
+        }
         return chain;
       });
     },

@@ -15,7 +15,12 @@ import { useFocusQuery } from '@/shared/ui/use-focus-query';
 import { useSubmit } from '@/shared/ui/use-submit';
 
 import { useOnChain } from './onchain-context';
-import { refreshFailures, shortAddress, watchedSubtitle } from './onchain-model';
+import {
+  refreshFailures,
+  shortAddress,
+  watchedSubtitle,
+  type RefreshFailure,
+} from './onchain-model';
 
 export function OnChainScreen() {
   const onchain = useOnChain();
@@ -28,7 +33,7 @@ export function OnChainScreen() {
     return { watched, enabled };
   }, [onchain]);
   const { state, reload } = useFocusQuery(load);
-  const [failures, setFailures] = useState<string[]>([]);
+  const [failures, setFailures] = useState<RefreshFailure[]>([]);
   const refresh = useSubmit(
     () => onchain.refreshAll(),
     (outcomes) => {
@@ -59,8 +64,8 @@ export function OnChainScreen() {
             />
           ))}
           <ErrorBanner message={refresh.error} />
-          {failures.map((failure) => (
-            <Notice key={failure}>{failure}</Notice>
+          {failures.map(({ id, message }) => (
+            <Notice key={id}>{message}</Notice>
           ))}
           {watched.length > 0 ? (
             <Button

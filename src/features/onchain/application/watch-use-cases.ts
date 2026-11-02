@@ -104,6 +104,8 @@ export function createWatchUseCases(
     const chain = await store.onchain.getChain(watched.chainId);
     const token = await store.onchain.getToken(watched.tokenId);
     if (!chain || !token) return notFound('Token');
+    // From the start of the read: of two running at once, the one asked later knows more.
+    const readAt = clock.now().toISOString();
     const reply = await client.readBalance({
       family: chain.family,
       endpoint: chain.endpoint,
@@ -117,8 +119,12 @@ export function createWatchUseCases(
       const message = `The contract reports ${decimals} decimals, but ${token.symbol} is set to ${token.decimals}. Check the token.`;
       return err(onChainError('decimals-mismatch', message));
     }
-    const readAt = clock.now().toISOString();
-    await store.onchain.saveRead(watched, token.contract, { amount: balance, decimals, readAt });
+    await store.onchain.saveRead(
+      watched,
+      { contract: token.contract, endpoint: chain.endpoint, evmChainId: chain.evmChainId },
+      { amount: balance, decimals, readAt },
+      clock.now().toISOString(),
+    );
     const view = await getWatched(id);
     return view ? ok(view) : notFound('Address');
   }
@@ -178,12 +184,15 @@ export function createWatchUseCases(
     refresh: async (id: string): Promise<Result<WatchedView, OnChainError>> =>
       (await networkEnabled()) ? read(id) : disabled(),
 
-    /** One at a time, so a public endpoint sees no burst. */
+    /**
+     * One at a time, so a public endpoint sees no burst. The switch is asked before each address,
+     * so turning it off stops the rest of a long run.
+     */
     refreshAll: async (): Promise<Result<RefreshOutcome[], OnChainError>> => {
       if (!(await networkEnabled())) return disabled();
       const outcomes: RefreshOutcome[] = [];
       for (const { id, label } of await store.onchain.listWatched()) {
-        const reply = await read(id);
+        const reply = (await networkEnabled()) ? await read(id) : disabled();
         outcomes.push({ id, label, error: reply.ok ? null : reply.error.message });
       }
       return ok(outcomes);

@@ -339,3 +339,30 @@ describe('fetch on-chain client', () => {
     });
   });
 });
+
+describe('the Tron call path', () => {
+  it.each([
+    ['https://tron.example.com', 'https://tron.example.com/wallet/triggerconstantcontract'],
+    ['https://tron.example.com/v1', 'https://tron.example.com/v1/wallet/triggerconstantcontract'],
+    [
+      'https://tron.example.com?apikey=abc',
+      'https://tron.example.com/wallet/triggerconstantcontract?apikey=abc',
+    ],
+    [
+      'https://tron.example.com/?apikey=abc',
+      'https://tron.example.com/wallet/triggerconstantcontract?apikey=abc',
+    ],
+    [
+      'https://tron.example.com/v1/?a=1&b=2',
+      'https://tron.example.com/v1/wallet/triggerconstantcontract?a=1&b=2',
+    ],
+    [
+      'https://tron.example.com/v1#part',
+      'https://tron.example.com/v1/wallet/triggerconstantcontract',
+    ],
+  ])('calls %s at %s', async (endpoint, url) => {
+    const { fetch, calls } = scripted(tronResult(word(6n)), tronResult(word(1n)));
+    await client(fetch).readBalance({ ...tron, endpoint });
+    expect(calls.map((call) => call.url)).toEqual([url, url]);
+  });
+});

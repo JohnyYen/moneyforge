@@ -430,16 +430,115 @@ describe('on-chain balances', () => {
       });
     });
 
-    it('never lets an older answer replace a newer one', async () => {
+    it('never lets a read that started first replace one that started later', async () => {
       const saved = await watch();
       await enabled();
+      answer = async () => {
+        now = new Date(NOW.getTime() + 60_000);
+        answer = async () => ok({ balance: 9n, decimals: 6 });
+        unwrap(await onchain().refresh(saved.id));
+        return ok({ balance: 1n, decimals: 6 });
+      };
       unwrap(await onchain().refresh(saved.id));
-      now = new Date(NOW.getTime() - 60_000);
+      await expect(onchain().getWatched(saved.id)).resolves.toMatchObject({
+        watched: { lastRead: { amount: 9n } },
+      });
+    });
+
+    it('replaces a read dated in the future, so a clock set back cannot freeze the value', async () => {
+      const saved = await watch();
+      await enabled();
+      now = new Date(NOW.getTime() + 24 * 60 * 60 * 1000);
+      unwrap(await onchain().refresh(saved.id));
+      now = NOW;
       answer = async () => ok({ balance: 9n, decimals: 6 });
       unwrap(await onchain().refresh(saved.id));
       await expect(onchain().getWatched(saved.id)).resolves.toMatchObject({
+        watched: { lastRead: { amount: 9n, readAt: NOW.toISOString() } },
+      });
+    });
+
+    it('calls a read dated in the future stale', async () => {
+      const saved = await watch();
+      await enabled();
+      now = new Date(NOW.getTime() + 24 * 60 * 60 * 1000);
+      unwrap(await onchain().refresh(saved.id));
+      now = NOW;
+      await expect(onchain().getWatched(saved.id)).resolves.toMatchObject({ stale: true });
+    });
+
+    const editChain = async (change: { endpoint?: string; name?: string; evmChainId?: string }) => {
+      const chain = await onchain().getChain('default-ethereum');
+      if (chain) unwrap(await onchain().saveChain({ ...chain, ...change }));
+    };
+
+    const watchEvm = async () => {
+      const saved = await watch({
+        chainId: 'default-ethereum',
+        tokenId: 'default-usdt-ethereum',
+        address: EVM_ADDRESS,
+      });
+      await enabled();
+      return saved;
+    };
+
+    it.each([
+      ['endpoint', { endpoint: 'https://other.example.com' }],
+      ['chain ID', { evmChainId: '137' }],
+    ])('forgets reads of a chain whose %s changes', async (_, change) => {
+      const saved = await watchEvm();
+      unwrap(await onchain().refresh(saved.id));
+      await editChain(change);
+      await expect(onchain().getWatched(saved.id)).resolves.toMatchObject({
+        watched: { lastRead: null },
+      });
+    });
+
+    it('keeps reads of a chain only renamed', async () => {
+      const saved = await watchEvm();
+      unwrap(await onchain().refresh(saved.id));
+      await editChain({ name: 'Mainnet' });
+      await expect(onchain().getWatched(saved.id)).resolves.toMatchObject({
         watched: { lastRead: { amount: 1_500_000n } },
       });
+    });
+
+    it('drops a read of a chain edited while it was running', async () => {
+      const saved = await watchEvm();
+      answer = async () => {
+        await editChain({ endpoint: 'https://other.example.com' });
+        return ok({ balance: 1n, decimals: 6 });
+      };
+      unwrap(await onchain().refresh(saved.id));
+      await expect(onchain().getWatched(saved.id)).resolves.toMatchObject({
+        watched: { lastRead: null },
+      });
+    });
+
+    it('stops contacting anything when the switch goes off during refresh all', async () => {
+      const first = await watch({ label: 'A' });
+      const second = await watch({
+        label: 'B',
+        chainId: 'default-ethereum',
+        tokenId: 'default-usdt-ethereum',
+        address: EVM_ADDRESS,
+      });
+      await enabled();
+      answer = async () => {
+        await onchain().setNetworkEnabled(false);
+        return ok({ balance: 5n, decimals: 6 });
+      };
+      await expect(onchain().refreshAll()).resolves.toEqual(
+        ok([
+          { id: first.id, label: 'A', error: null },
+          {
+            id: second.id,
+            label: 'B',
+            error: 'Turn on network reads in network settings first.',
+          },
+        ]),
+      );
+      expect(queries).toHaveLength(1);
     });
 
     it('refreshes every address in turn, and one failure does not stop the rest', async () => {

@@ -12,6 +12,13 @@ export type BalanceQuery = {
   readonly address: string;
 };
 
+/** What a read was asked of, to tell whether it still applies when the answer arrives. */
+export type ReadOrigin = {
+  readonly contract: string;
+  readonly endpoint: string;
+  readonly evmChainId: string | null;
+};
+
 export type BalanceRead = { readonly balance: bigint; readonly decimals: number };
 
 /** Reads, and nothing else: no method here signs or sends. Failures are results, never throws. */
@@ -42,12 +49,20 @@ export interface OnChainRepository {
   removeWatched(id: string): Promise<void>;
 
   /**
-   * Keeps a read only if the row still watches what was read, on the same contract, and holds
-   * nothing newer, because the network ran outside any write and the person may have edited it.
+   * Keeps a read only if the row still watches what was read, through the same contract and
+   * endpoint, and holds no read that started later, because the network ran outside any write
+   * and the person may have edited it. A stored time after `now` proves nothing, so it yields.
    */
-  saveRead(watched: WatchedAddress, contract: string, read: LastRead): Promise<void>;
+  saveRead(
+    watched: WatchedAddress,
+    origin: ReadOrigin,
+    read: LastRead,
+    now: string,
+  ): Promise<void>;
   /** A contract edit makes the amounts read from the old one meaningless. */
   clearReads(tokenId: string): Promise<void>;
+  /** So does an edit of where a chain's reads come from. */
+  clearChainReads(chainId: string): Promise<void>;
 }
 
 export interface OnChainRepositories extends LedgerRepositories {
