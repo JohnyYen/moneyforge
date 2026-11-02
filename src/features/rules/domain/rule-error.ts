@@ -5,6 +5,7 @@ export type RuleErrorCode =
   | 'invalid-source'
   | 'invalid-rule'
   | 'invalid-template'
+  | 'invalid-pack'
   | 'invalid-settings'
   | 'item-resolved'
   | 'item-incomplete';

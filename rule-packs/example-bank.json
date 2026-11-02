@@ -1,0 +1,42 @@
+{
+  "format": "moneyforge-rule-pack",
+  "version": 1,
+  "name": "Example Bank (invented)",
+  "description": "An invented bank, to show the format. It matches no real messages.",
+  "sources": [
+    {
+      "name": "Example Bank",
+      "channel": "sms",
+      "sender": "EXAMPLEBANK",
+      "rules": [
+        {
+          "name": "Card purchase",
+          "priority": 10,
+          "template": "Example Bank: purchase of {amount} {currency} at {counterparty}. Ref {reference}.",
+          "format": { "decimal": ".", "thousands": "," },
+          "kind": "expense",
+          "account": "Everyday account",
+          "category": "Card purchases"
+        },
+        {
+          "name": "Money received",
+          "priority": 10,
+          "template": "Example Bank: you received {amount} {currency} from {counterparty}. Ref {reference}.",
+          "format": { "decimal": ".", "thousands": "," },
+          "kind": "income",
+          "account": "Everyday account",
+          "category": "Money received"
+        },
+        {
+          "name": "Move to savings",
+          "priority": 5,
+          "template": "Example Bank: {amount} {currency} moved to savings. Ref {reference}.",
+          "format": { "decimal": ".", "thousands": "," },
+          "kind": "transfer_out",
+          "account": "Everyday account",
+          "counterpart": "Savings account"
+        }
+      ]
+    }
+  ]
+}

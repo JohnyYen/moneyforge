@@ -56,6 +56,8 @@ export default function RootLayout() {
             <Stack.Screen name="data/index" options={{ title: 'Data' }} />
             <Stack.Screen name="data/csv-import" options={{ title: 'Import CSV' }} />
             <Stack.Screen name="data/csv-export" options={{ title: 'Export CSV' }} />
+            <Stack.Screen name="data/pack-import" options={{ title: 'Import rule pack' }} />
+            <Stack.Screen name="data/pack-export" options={{ title: 'Export rule pack' }} />
             <Stack.Screen name="inbox/index" options={{ title: 'Inbox' }} />
             <Stack.Screen name="inbox/paste" options={{ title: 'Paste a message' }} />
             <Stack.Screen name="inbox/[id]" options={{ title: 'Review message' }} />

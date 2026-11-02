@@ -168,6 +168,8 @@ Each imported row keeps a keyed fingerprint of its account, day, kind, amount, a
 
 CSV export writes one row per account a transaction touched, with exact amounts. Text that a spreadsheet would run as a formula is neutralized with a leading apostrophe. It uses the system share sheet, so it carries text and refuses more than 200,000 characters rather than cutting it short.
 
+Rule packs share sources and rules with no personal data. See [rule-packs](rule-packs/README.md).
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).

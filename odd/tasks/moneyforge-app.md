@@ -47,7 +47,7 @@ Out of scope: moving real money, custody, a backend server, iOS, and web.
 
 Route for every task unless noted: delegated direct, because each touches 2+ non-trivial files.
 
-Review base for the next candidate: `e38c714`.
+Review base for the next candidate: `c1cd99e`.
 
 - [x] T1 Scaffold: Expo app, TypeScript strict, lint, Jest, folder structure, README. Commit: `feat: scaffold Expo app`.
 - [x] T2 Ledger core: money, currencies, accounts, categories, double-entry journal, transfers, conversions, reconciliation, SQLite, base screens. Commits: `a151036`, `5bab646`, `09b24b9`.
@@ -63,7 +63,9 @@ Review base for the next candidate: `e38c714`.
 - [x] T7a Assets: types, values, expected and actual cash flow, reports, portfolio, net worth with assets, projection source, Assets tab. Planning follow-ups included. Commits: `ac6a8a5`, `9d4dabf`, and the `feat(assets): add the Assets tab and link transactions from their screens` commit that records this line.
 - [x] T7a.1 T7a hardening: verified findings on stream edits, coverage by amount and current transaction state, overdue expenses, budget double counts, late payments, projection notices, link failures, and report figures. Commit: `df4f609`.
 - [x] T7b On-chain balances: read-only balances by public address. Commits: `abdcd66` (T7a.1 advisory), `c717c4b`, and the `feat(onchain): add the on-chain screens` commit that records this line.
-- [ ] T8 Data and release: encrypted backup, CSV import, shareable rule packs, CI, store listing, privacy policy. Rule packs exclude samples. Backup must carry `rules.dedup_secret`, or every stored dedup key stops matching after a restore. A chain endpoint may hold an API key, so a plain export must leave `onchain_chains.endpoint` out or say so.
+- [x] T8a CSV and rule packs: T7b advisories, CSV import and export, shareable rule packs, Data screen. Rule packs exclude samples. Commits: `c383635` (advisories), `d6144b0`, and the `feat(rules): add shareable rule packs` commit that records this line.
+- [ ] T8b Backup: encrypted export and import. Backup must carry `rules.dedup_secret` and `imported_rows`, or every stored dedup key and import fingerprint stops matching after a restore. A chain endpoint may hold an API key, so a plain export must leave `onchain_chains.endpoint` out or say so.
+- [ ] T8c Release: CI, docs, store listing, privacy policy.
 
 ## Acceptance criteria
 
@@ -460,7 +462,41 @@ T7b evidence:
   - A stale read may still open reconcile, with the read time and a notice on screen. The form says it was filled in, and the person must press Reconcile.
   - Stale means older than one hour, a constant, not user data.
   - Chains and tokens can be added and edited, not deleted. A family and a token's chain are fixed once created.
+- review: medium, approved by native review
+
+T8a done. Route: delegated direct; 2+ non-trivial files.
+
+T8a evidence:
+
+- RED, advisories: `pnpm test --testPathPatterns features/onchain`: 13 failed of 173, 3 suites. RED, CSV: 3 suites failed with `Cannot find module`. RED, packs: the domain suite failed with `Cannot find module`, and 15 failed of 15 in the service suite.
+- GREEN: `pnpm test`: 71 suites, 1601 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exit 0, one 3.7 MB Hermes bundle.
+- The transfer suites also passed with `TZ` set to `Pacific/Auckland`, `Pacific/Pago_Pago`, and `America/New_York`, 127 of 127 each.
+- Mutations, each failing tests: `autoPost` on (2), unknown pack fields allowed (11), pack rules unchecked (9), a refused pack rule returned instead of thrown (1), pack rule dedup off (2), formulas not neutralized (9), known rows ignored (4), no repeat count (12), batch outside a transaction (1), zero amount allowed (1), BOM kept (2).
+- Over the 2500 line target: about 3440 authored lines before this document, about 1240 of them tests. Commits are sliced: advisories, CSV, packs.
+- Not run: no device run, Gradle build, or screen rendering test. Migration 007 ran on `node:sqlite` only. Every Data screen, the paste screen's CSV action, and `Share.share` with a large message are compiled, never executed. `transfer-model` is tested on its own.
+- Advisories, each fixed:
+  - `R3-chain-edit-keeps-reads`: a new endpoint or chain ID clears that chain's reads, a rename does not, and `saveRead` also matches the endpoint and chain ID, so a read in flight is dropped.
+  - `R3-future-read-blocks-refresh`: supersedes the T7b rule that a later `readAt` always wins. `readAt` is now when the read started, and a stored time after now yields. So of two running reads, the one asked later wins, whichever answers last. A read dated in the future counts as stale.
+  - `R3-refresh-all-ignores-switch-off`: the switch is asked before each address. Skipped addresses report the network-disabled message. A read already sent still lands.
+  - `R3-tron-query-endpoint`: the call path goes before the query, and a fragment is dropped.
+  - `R3-duplicate-failure-keys`: `refreshFailures` returns the address id with each message.
+- Decisions:
+  - Import is one atomic batch of the valid rows, not per row, so a retry never meets half a file. Invalid and duplicate rows are skipped and reported. A failure while writing throws inside the write, because a returned error commits. The plan is computed again inside the write, so the result can differ from the preview if data changed between them.
+  - The fingerprint uses the install's `rules.dedup_secret`, under the label `csv-row`, so a backup has one secret to carry. `keyedHash` moved to `src/shared/keyed-hash.ts`. It covers account, day, kind, amount, and folded description, not text, so a re-export in another format still matches, and not category, so recategorizing does not duplicate. A repeat count keeps identical rows of one file apart.
+  - Fingerprints live in `imported_rows`, deleted with their transaction, so a deleted row can be imported again. It shows in the preview as new. Entries typed by hand or posted from a message are not compared.
+  - Nothing is detected: separator, columns, date order, number format, and the meaning of a positive amount are all chosen. A two-digit year, brackets, currency marks, and exponents are invalid. A time after a date is dropped. In debit and credit columns a zero counts as empty, because banks often fill the unused side with 0.00, and a negative is invalid.
+  - Rows post at local noon. Imported income runs no split and rules run no hooks. Categories match by folded name within the kind: two matches or an archived match make the row invalid, since creating a twin would hide the problem. One import creates up to 100 categories. A fallback is chosen per kind, and empty means no category.
+  - Caps: 1,000,000 characters, 5000 rows, 64 columns, 2000 characters a cell. The first row sets the column count. A row of another width is invalid.
+  - Export uses `Share` with text. `expo-file-system` is present only through `expo`, and `expo-sharing` is absent, so no file is written. Past 200,000 characters it refuses and asks for a shorter range, because an Android intent fails near 1 MB. That limit is reasoned from Binder, never observed on a device.
+  - Export writes one row per posting on a user account, so a transfer shows both sides and a fee sits inside the sending amount. Amounts use a point and are the only unneutralized cells that can start with a minus. A description such as `-5 apples` gains an apostrophe, and importing it back keeps that apostrophe.
+  - The pack format has no field for auto-post, split mode, samples, or ids, so those are refused as unknown rather than reset. Import then sets `autoPost` off and `splitMode` to `ask` on income. Other kinds stay `none`, because `validateRule` allows a split only on income, which differs from the brief's plain `ask`.
+  - The rule's `currencyCode` is left out of packs, because a stored value must equal the account's currency, so null means the same. Slots are derived from the rules, and export names them `Account 1` and `Income category 1`, because an account name can hold card digits. Templates and sender names are exported as written, with a warning to read them.
+  - A rule counts as known by source, template, kind, and number format. An existing source keeps its own name, channel, and enabled state. A new source starts enabled, so the sender joins the allowlist on confirmation, and the preview says so. `onSourcesChanged` runs after the write.
+  - Slot mappings are `Map`s, because a slot name comes from the pack and may be `__proto__`. Rule packs depend on no transfer code; `shareText` lives in `src/shared/ui`.
 
 ## Next step
 
-T8: data and release. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002, 003, 004, 005, and 006 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes.
+T8b: encrypted backup, carrying `rules.dedup_secret` and `imported_rows`. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, and the Data screens, including `Share` with a large CSV.

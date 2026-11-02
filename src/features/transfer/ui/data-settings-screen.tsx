@@ -18,6 +18,17 @@ export function DataSettingsScreen() {
         subtitle="Share transactions for a range"
         onPress={() => router.push('/data/csv-export')}
       />
+      <SectionLabel>Rule packs</SectionLabel>
+      <ListRow
+        title="Import a rule pack"
+        subtitle="Add sources and rules someone shared"
+        onPress={() => router.push('/data/pack-import')}
+      />
+      <ListRow
+        title="Export a rule pack"
+        subtitle="Share your rules, without your messages or accounts"
+        onPress={() => router.push('/data/pack-export')}
+      />
     </Screen>
   );
 }

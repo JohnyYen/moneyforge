@@ -83,7 +83,7 @@ async function checkReferences(
   return ok(undefined);
 }
 
-async function writeRule(
+export async function writeRule(
   repositories: RuleRepositories,
   input: Rule,
   existing: Rule | null,
@@ -96,7 +96,7 @@ async function writeRule(
   return rule;
 }
 
-async function writeSource(
+export async function writeSource(
   { rules }: RuleRepositories,
   input: MessageSource,
 ): Promise<RuleResult<MessageSource>> {
