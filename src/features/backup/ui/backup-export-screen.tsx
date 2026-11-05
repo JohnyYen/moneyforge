@@ -4,7 +4,12 @@ import { Button, ErrorBanner, Muted, Notice, Screen, TextField } from '@/shared/
 import { useSubmit } from '@/shared/ui/use-submit';
 
 import { useBackup } from './backup-context';
-import { canExport, emptyExportDraft, type ExportDraft } from './backup-model';
+import {
+  canExport,
+  emptyExportDraft,
+  exportDraftAfterAttempt,
+  type ExportDraft,
+} from './backup-model';
 
 export function BackupExportScreen() {
   const { backup } = useBackup();
@@ -12,10 +17,12 @@ export function BackupExportScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const share = useSubmit(
     async (current: ExportDraft) => {
-      const exported = await backup.exportBackup(current);
-      // The passphrase leaves the screen either way; a retry types it again.
-      setDraft(emptyExportDraft);
-      return exported;
+      try {
+        return await backup.exportBackup(current);
+      } finally {
+        // Cleared on success, refusal, or a throw alike; a retry types it again.
+        setDraft(exportDraftAfterAttempt());
+      }
     },
     () =>
       setNotice('Backup prepared. Keep the passphrase safe: without it, nobody can open the file.'),

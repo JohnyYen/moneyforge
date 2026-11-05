@@ -9,6 +9,7 @@ import { generateId } from '@/shared/id';
 import { openExpoSqliteDriver } from '@/shared/persistence/expo-sqlite-driver';
 import { migrations } from '@/shared/persistence/migrations';
 import { runMigrations } from '@/shared/persistence/migrator';
+import type { SqlDriver } from '@/shared/persistence/sql-driver';
 import { generateSecret } from '@/shared/secret';
 import { ok } from '@/shared/result';
 import { shareText } from '@/shared/ui/share-text';
@@ -32,8 +33,24 @@ const backupTransport: BackupTransport = {
   receive: async (text) => ok(text),
 };
 
-export async function openAppServices(): Promise<AppServices> {
+export type OpenedAppServices = {
+  readonly services: AppServices;
+  /** Closes the database once the work already queued on it has run. */
+  readonly close: () => Promise<void>;
+};
+
+export async function openAppServices(): Promise<OpenedAppServices> {
   const driver = await openExpoSqliteDriver(DATABASE_NAME);
+  try {
+    return { services: await startServices(driver), close: () => driver.close() };
+  } catch (error) {
+    // A launch that fails leaves no handle open behind it; a retry opens a new one.
+    await driver.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function startServices(driver: SqlDriver): Promise<AppServices> {
   await runMigrations(driver, migrations);
   const services = createAppServices({
     driver,

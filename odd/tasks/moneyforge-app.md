@@ -67,7 +67,7 @@ Review base for the next candidate: `a3af194`.
 - [x] T8a.1 T8a hardening: verified findings on packs taking over a source, rule selection stopping at a failure, CSV preview and undo, export round trips, all-accounts files, packs storing personal senders, dates, caps, fallbacks, control characters, and semicolon formulas. Commits: `c20c997`, and the `fix(transfer): show what an import will do, undo it, and survive a round trip` commit that records this line.
 - [x] T8b Backup: encrypted export and import. Backup carries `rules.dedup_secret` and `imported_rows` with `batch_id`; `onchain_chains.endpoint` travels only inside the encrypted payload, never in the clear container.
 - [x] T8c.1 Data screen backup export and restore. Commit: the `feat(backup): add Data screen backup export and restore` commit that records this line.
-- [ ] T8c.1b Review advisories: clear the export passphrase on failure, discard a restore check whose inputs changed while it ran, close the old database handle on reopen, cover the screen invariants.
+- [x] T8c.1b Review advisories: clear the export passphrase on failure, discard a restore check whose inputs changed while it ran, close the old database handle on reopen, cover the screen invariants. Commit: the `fix(backup): clear passphrase on failure, drop stale restore checks, close old database on reopen` commit that records this line.
 - [x] T8c.2 Docs: README and privacy policy. Commit: the `docs: add privacy policy and README overview` commit that records this line.
 - [x] T8c.3 CI: typecheck, lint, test, Android export. Commit: the `ci: add typecheck, lint, test and Android export workflow` commit that records this line.
 - [ ] T8c.4 Store listing copy
@@ -569,6 +569,23 @@ T8c.1 evidence:
   - Strength and matching of the passphrase stay with `checkPassphrase`; the model only waits for both fields so the service's message is the one shown.
 - Not run: no device run or screen render test; there is no render test library. Reopening opens a second `expo-sqlite` handle without closing the first, as the existing retry path already does; that is unverified on a device.
 
+T8c.1b done. Route: delegated direct, one bounded writer, fixing the non-blocking advisories from the approved T8c.1 review.
+
+T8c.1b evidence:
+
+- What changed: `backup-model.ts` gains `exportDraftAfterAttempt`, `RestoreScreenState` with `initialRestoreState`, `editRestoreInputs`, `typeRestoreConfirmation`, `settleRestoreCheck`, and `confirmedRestore`; both screens delegate those decisions to it. `openAppServices` returns `{ services, close }` and closes its driver when startup fails after the open. `AppServicesProvider` closes the previous database before opening the next; its context value is renamed `backupAccess`. `sql-driver.test.ts` gains a `SqlDriver close` block.
+- Export: the passphrase is cleared in a `finally`, so a refusal or a throw clears it as a success does; the comment now says so.
+- Restore: every edit to the text or passphrase bumps a revision and drops the check; a check settles only if the revision it started from is still current, otherwise its result is discarded, even when an edit restored the same text. The passphrase is cleared after any settled check, failed or not. Typing the confirmation goes through a functional update that keeps the revision and the check, so it can neither revive a stale check nor revert an edit.
+- Reopen order: close, then open. `reopen` renders the loading state first, so no screen is mounted on the old services; the driver's `close` is queued behind work already on it, so a restore's commit lands before the handle closes, and a late call from an unmounted screen fails rather than writing through a second handle. A pending close is chained, so a re-run of the effect waits for it; an open that lands after its effect ended is closed at once.
+- RED: `pnpm jest src/features/backup/ui` with the new tests and no model functions: 10 failed, 7 passed.
+- GREEN: the same run: 17 passed.
+- The two driver close tests pass against the existing driver: they pin the queued-close behavior the reopen order relies on, so no RED applies.
+- `pnpm test`: 76 suites, 1805 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exit 0; `dist/` was deleted.
+- Not run: no render test of either screen or the provider (no render test library), and no device run of close-then-open under `expo-sqlite`. A stale check that fails can still show its error banner after an edit; it no longer stores anything.
+
 T8c.3 done. Route: delegated direct, one bounded writer. Test-first does not apply: the change is configuration with no runnable RED, so each workflow step was run locally as proof.
 
 T8c.3 evidence:
@@ -597,4 +614,4 @@ T8c.2 evidence:
 
 ## Next step
 
-T8c.1b review advisories, then T8c.4 store listing copy. Before publishing, fill `<contact email>` in the privacy policy and confirm the license id. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.
+T8c.4 store listing copy. Before publishing, fill `<contact email>` in the privacy policy and confirm the license id. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.

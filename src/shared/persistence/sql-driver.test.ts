@@ -119,6 +119,30 @@ function fakeConnection(fails: (sql: string) => Error | null = () => null) {
   return { connection, statements };
 }
 
+describe('SqlDriver close', () => {
+  it('closes only after the work already queued has run', async () => {
+    const { connection, statements } = fakeConnection();
+    const driver = createSqlDriver(connection, async () => {
+      statements.push('CLOSE');
+    });
+
+    const transaction = driver.transaction(async (tx) => {
+      await tx.run('INSERT restored');
+    });
+    const closed = driver.close();
+    await Promise.all([transaction, closed]);
+
+    expect(statements).toEqual(['BEGIN IMMEDIATE', 'INSERT restored', 'COMMIT', 'CLOSE']);
+  });
+
+  it('fails a call made after close instead of reopening anything', async () => {
+    const driver = createNodeSqliteDriver();
+    await driver.close();
+
+    await expect(driver.run('SELECT 1')).rejects.toThrow();
+  });
+});
+
 describe('SqlDriver rollback failures', () => {
   const failWork = () => Promise.reject(new Error('boom'));
   const closeNothing = async () => undefined;

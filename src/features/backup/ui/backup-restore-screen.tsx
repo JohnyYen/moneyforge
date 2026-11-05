@@ -16,11 +16,20 @@ import { RESTORE_CONFIRMATION, type PreparedRestore } from '../application/backu
 import { useBackup } from './backup-context';
 import {
   canCheckRestore,
-  emptyRestoreDraft,
-  isConfirmed,
+  confirmedRestore,
+  editRestoreInputs,
+  initialRestoreState,
   restoreLines,
+  settleRestoreCheck,
+  typeRestoreConfirmation,
   type RestoreDraft,
+  type RestoreScreenState,
 } from './backup-model';
+
+type CheckInput = Pick<RestoreDraft, 'text' | 'passphrase'> & {
+  /** The input revision the check started from; a later edit makes its result stale. */
+  readonly revision: number;
+};
 
 function askToReplace(onReplace: () => void) {
   Alert.alert('Replace everything?', 'This device will hold only what the backup holds.', [
@@ -31,28 +40,32 @@ function askToReplace(onReplace: () => void) {
 
 export function BackupRestoreScreen() {
   const { backup, reopen } = useBackup();
-  const [draft, setDraft] = useState<RestoreDraft>(emptyRestoreDraft);
-  /** Holds the opened snapshot, never the passphrase that opened it. */
-  const [prepared, setPrepared] = useState<PreparedRestore | null>(null);
+  // Updates go through the model as functions of the latest state, so a check that
+  // settles late sees every edit made while it ran.
+  const [state, setState] = useState<RestoreScreenState>(initialRestoreState);
+  const { draft, prepared } = state;
+  const confirmed = confirmedRestore(state);
 
-  /** Any change leaves the check behind, so what is replaced is always what was shown. */
-  const change = (patch: Partial<RestoreDraft>) => {
-    setDraft({ ...draft, ...patch });
-    setPrepared(null);
-  };
+  const edit = (patch: Partial<Pick<RestoreDraft, 'text' | 'passphrase'>>) =>
+    setState((current) => editRestoreInputs(current, patch));
 
   const check = useSubmit(
-    async ({ text, passphrase }: RestoreDraft) => {
-      const opened = await backup.prepareRestore({ text: text.trim(), passphrase });
-      // Once checked, the passphrase has done its work and leaves the screen.
-      setDraft((current) => ({ ...current, passphrase: '', typed: '' }));
-      return opened;
+    async ({ text, passphrase, revision }: CheckInput) => {
+      let opened: PreparedRestore | null = null;
+      try {
+        const result = await backup.prepareRestore({ text: text.trim(), passphrase });
+        if (result.ok) opened = result.value;
+        return result;
+      } finally {
+        setState((current) => settleRestoreCheck(current, revision, opened));
+      }
     },
-    setPrepared,
+    // The model already stored the result, or dropped it as stale.
+    () => undefined,
   );
   const replace = useSubmit(
     ({ checked, typed }: { checked: PreparedRestore; typed: string }) =>
-      backup.applyRestore(checked, typed.trim()),
+      backup.applyRestore(checked, typed),
     // Services open again from the restored database, as on a fresh launch.
     reopen,
     { exitsOnSuccess: true },
@@ -68,14 +81,14 @@ export function BackupRestoreScreen() {
         label="Backup text"
         multiline
         value={draft.text}
-        onChangeText={(text) => change({ text })}
+        onChangeText={(text) => edit({ text })}
         autoCapitalize="none"
         autoCorrect={false}
       />
       <TextField
         label="Passphrase"
         value={draft.passphrase}
-        onChangeText={(passphrase) => change({ passphrase })}
+        onChangeText={(passphrase) => edit({ passphrase })}
         secureTextEntry
         autoCapitalize="none"
         autoCorrect={false}
@@ -85,7 +98,13 @@ export function BackupRestoreScreen() {
         label="Check backup"
         variant={prepared ? 'secondary' : 'primary'}
         disabled={check.submitting || !canCheckRestore(draft)}
-        onPress={() => void check.submit(draft)}
+        onPress={() =>
+          void check.submit({
+            text: draft.text,
+            passphrase: draft.passphrase,
+            revision: state.revision,
+          })
+        }
       />
       {prepared ? (
         <>
@@ -96,16 +115,18 @@ export function BackupRestoreScreen() {
           <TextField
             label={`Type ${RESTORE_CONFIRMATION} to confirm`}
             value={draft.typed}
-            onChangeText={(typed) => setDraft({ ...draft, typed })}
+            onChangeText={(typed) =>
+              setState((current) => typeRestoreConfirmation(current, typed))
+            }
             autoCapitalize="characters"
             autoCorrect={false}
           />
           <Button
             label="Replace everything"
-            disabled={replace.submitting || !isConfirmed(draft.typed)}
-            onPress={() =>
-              askToReplace(() => void replace.submit({ checked: prepared, typed: draft.typed }))
-            }
+            disabled={replace.submitting || !confirmed}
+            onPress={() => {
+              if (confirmed) askToReplace(() => void replace.submit(confirmed));
+            }}
           />
         </>
       ) : null}
