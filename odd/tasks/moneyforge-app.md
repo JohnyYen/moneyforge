@@ -68,7 +68,7 @@ Review base for the next candidate: `a3af194`.
 - [x] T8b Backup: encrypted export and import. Backup carries `rules.dedup_secret` and `imported_rows` with `batch_id`; `onchain_chains.endpoint` travels only inside the encrypted payload, never in the clear container.
 - [x] T8c.1 Data screen backup export and restore. Commit: the `feat(backup): add Data screen backup export and restore` commit that records this line.
 - [ ] T8c.2 Docs: README and privacy policy
-- [ ] T8c.3 CI: typecheck, lint, test, Android export
+- [x] T8c.3 CI: typecheck, lint, test, Android export. Commit: the `ci: add typecheck, lint, test and Android export workflow` commit that records this line.
 - [ ] T8c.4 Store listing copy
 
 ## Acceptance criteria
@@ -568,6 +568,21 @@ T8c.1 evidence:
   - Strength and matching of the passphrase stay with `checkPassphrase`; the model only waits for both fields so the service's message is the one shown.
 - Not run: no device run or screen render test; there is no render test library. Reopening opens a second `expo-sqlite` handle without closing the first, as the existing retry path already does; that is unverified on a device.
 
+T8c.3 done. Route: delegated direct, one bounded writer. Test-first does not apply: the change is configuration with no runnable RED, so each workflow step was run locally as proof.
+
+T8c.3 evidence:
+
+- What changed: `.github/workflows/ci.yml` runs on push and pull request with `contents: read` and per-ref concurrency that cancels in progress. One job: checkout, pnpm, Node with the pnpm cache, `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `EXPO_OFFLINE=1 pnpm expo export --platform android`. No Gradle or APK job, since the native build is deferred.
+- Versions: `pnpm/action-setup@v4` pins pnpm 10.34.9 and `actions/setup-node@v5` pins Node 26.4.0, the versions every local check ran with. No `packageManager` field was added; the pin lives in the workflow. `actions/checkout@v5`.
+- `.gitignore` was not changed: `dist/` was already ignored on line 3. The T8c.1 note that it is not ignored was wrong; `git check-ignore` confirms the rule.
+- YAML: parsed with `js-yaml` from `node_modules`: keys `name`, `on`, `permissions`, `concurrency`, `jobs`, and the eight steps in order. `actionlint` is not installed, so the workflow schema and action inputs were not linted.
+- `pnpm install --frozen-lockfile --offline`: exit 0.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `pnpm test`: 76 suites, 1793 tests passed.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exit 0, one 3.7 MB Hermes bundle. `git status` did not list `dist/`, which was then deleted.
+- Not run: the workflow never ran on GitHub (no remote). The action major versions, the Node 26.4.0 download, and the pnpm cache are unverified there.
+
 ## Next step
 
-T8c.2 to T8c.4: README and privacy policy, CI, and store listing copy. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.
+T8c.2 and T8c.4: README and privacy policy, and store listing copy. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.
