@@ -70,7 +70,7 @@ Review base for the next candidate: `a3af194`.
 - [x] T8c.1b Review advisories: clear the export passphrase on failure, discard a restore check whose inputs changed while it ran, close the old database handle on reopen, cover the screen invariants. Commit: the `fix(backup): clear passphrase on failure, drop stale restore checks, close old database on reopen` commit that records this line.
 - [x] T8c.2 Docs: README and privacy policy. Commit: the `docs: add privacy policy and README overview` commit that records this line.
 - [x] T8c.3 CI: typecheck, lint, test, Android export. Commit: the `ci: add typecheck, lint, test and Android export workflow` commit that records this line.
-- [ ] T8c.4 Store listing copy
+- [x] T8c.4 Store listing copy. Commit: the `docs: add store listing copy` commit that records this line.
 
 ## Acceptance criteria
 
@@ -612,6 +612,16 @@ T8c.2 evidence:
 - Every relative link and heading anchor in the README resolves.
 - Not verified: the merged release manifest. The ignored `android/` prebuild declares `INTERNET`, `SYSTEM_ALERT_WINDOW`, `VIBRATE`, and legacy storage permissions from the Expo template; the policy lists only Internet and Receive SMS until a release build confirms the set. Device-to-device transfer on Android 12 and later is described as "may copy", unproven on a device.
 
+T8c.4 done. Route: delegated direct, one bounded writer. Test-first does not apply: passive documentation, so structural checks replace RED and GREEN.
+
+T8c.4 evidence:
+
+- What changed: `docs/store-listing.md` is new: variant-to-store mapping, app name, short and full description, feature bullets, Data safety answers, permissions rationale, category and rating notes, contact and URL placeholders, an asset checklist marked TODO, and open questions. The listing targets the Play variant and does not offer SMS capture there, because Play restricts SMS permissions and the full variant ships on GitHub Releases, as the Decisions section records.
+- Character counts, measured with node over the fenced text blocks: short description 73 of 80, full description 2406 of 4000.
+- Claims were checked against the README, the privacy policy, `app.config.ts`, and `plugins/with-message-capture.js`.
+- Found: the privacy policy says building a rule from a message copies it into the rule's samples, but `src/features/rules/ui/rules-model.ts` keeps samples to what the user types, and the README agrees. The listing follows the code. The policy line is still to be corrected.
+- Not verified: Google's current Data safety definitions for user-directed on-chain reads (no network), and the merged release manifest permissions.
+
 ## Next step
 
-T8c.4 store listing copy. Before publishing, fill `<contact email>` in the privacy policy and confirm the license id. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.
+Release: correct the rule-sample line in the privacy policy, resolve the open questions in `docs/store-listing.md`, fill `<contact email>` and the URL placeholders, and confirm the license id. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.
