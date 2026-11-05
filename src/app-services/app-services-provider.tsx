@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { AssetsContext } from '@/features/assets/ui/assets-context';
+import { BackupContext } from '@/features/backup/ui/backup-context';
 import { LedgerContext } from '@/features/ledger/ui/ledger-context';
 import { OnChainContext } from '@/features/onchain/ui/onchain-context';
 import { PlanningContext } from '@/features/planning/ui/planning-context';
@@ -23,6 +24,17 @@ export function AppServicesProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<OpenState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
 
+  /** Starts over from the database, as a launch would; the screens below remount. */
+  const reopen = useCallback(() => {
+    setState({ status: 'loading' });
+    setAttempt((value) => value + 1);
+  }, []);
+  const services = state.status === 'ready' ? state.services : null;
+  const backup = useMemo(
+    () => (services ? { backup: services.backup, reopen } : null),
+    [services, reopen],
+  );
+
   useEffect(() => {
     let active = true;
     openAppServices().then(
@@ -41,13 +53,7 @@ export function AppServicesProvider({ children }: { children: ReactNode }) {
   if (state.status === 'loading') return <LoadingState />;
   if (state.status === 'error') {
     return (
-      <FailureState
-        message={state.message}
-        onRetry={() => {
-          setState({ status: 'loading' });
-          setAttempt((value) => value + 1);
-        }}
-      />
+      <FailureState message={state.message} onRetry={reopen} />
     );
   }
   return (
@@ -59,7 +65,7 @@ export function AppServicesProvider({ children }: { children: ReactNode }) {
               <AssetsContext.Provider value={state.services.assets}>
                 <OnChainContext.Provider value={state.services.onchain}>
                   <TransferContext.Provider value={state.services.transfer}>
-                    {children}
+                    <BackupContext.Provider value={backup}>{children}</BackupContext.Provider>
                   </TransferContext.Provider>
                 </OnChainContext.Provider>
               </AssetsContext.Provider>

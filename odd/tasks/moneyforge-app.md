@@ -66,7 +66,10 @@ Review base for the next candidate: `a3af194`.
 - [x] T8a CSV and rule packs: T7b advisories, CSV import and export, shareable rule packs, Data screen. Rule packs exclude samples. Commits: `c383635` (advisories), `d6144b0`, and the `feat(rules): add shareable rule packs` commit that records this line.
 - [x] T8a.1 T8a hardening: verified findings on packs taking over a source, rule selection stopping at a failure, CSV preview and undo, export round trips, all-accounts files, packs storing personal senders, dates, caps, fallbacks, control characters, and semicolon formulas. Commits: `c20c997`, and the `fix(transfer): show what an import will do, undo it, and survive a round trip` commit that records this line.
 - [x] T8b Backup: encrypted export and import. Backup carries `rules.dedup_secret` and `imported_rows` with `batch_id`; `onchain_chains.endpoint` travels only inside the encrypted payload, never in the clear container.
-- [ ] T8c Release: CI, docs, store listing, privacy policy.
+- [x] T8c.1 Data screen backup export and restore. Commit: the `feat(backup): add Data screen backup export and restore` commit that records this line.
+- [ ] T8c.2 Docs: README and privacy policy
+- [ ] T8c.3 CI: typecheck, lint, test, Android export
+- [ ] T8c.4 Store listing copy
 
 ## Acceptance criteria
 
@@ -547,6 +550,24 @@ T8b evidence:
 - Mutations covered by the suites: a wrong or missing passphrase, a newer schema refused before the KDF, an unbalanced journal, unknown or injected columns, an empty required cell, a table the schema does not know, an older file checked against its own schema, a failed migration, a foreign-key violation, a transport too small, a cipher that cannot reopen, and no transport at all.
 - Not run: no device run, Gradle build, or screen rendering test. The backup has no screen yet; export and restore are services, tested on `node:sqlite` and `node:crypto` only. `expo-crypto` AES is exercised against a mocked native module, not on a device.
 
+T8c.1 done. Route: delegated direct, one bounded writer. The first pass stopped before writing: the provider exposed no backup service and no way to reopen services, and both fixes sat outside the allowed surface. The user approved `src/app-services/app-services-provider.tsx` and `app/_layout.tsx`; `app/data/_layout.tsx` was dropped because a nested layout would break the root `data/*` registrations.
+
+T8c.1 evidence:
+
+- What changed: `src/features/backup/ui/` gains `backup-model.ts` with its test, `backup-context.tsx`, `backup-export-screen.tsx`, and `backup-restore-screen.tsx`; routes `app/data/backup-export.tsx` and `app/data/backup-restore.tsx`; titles in `app/_layout.tsx`; a Backup section on the Data screen; `AppServicesProvider` provides `BackupContext` with `{ backup, reopen }`. `backup-service.ts` is unchanged.
+- RED: `pnpm jest src/features/backup/ui` against an empty module: 7 of 7 failed.
+- GREEN: the same run: 7 passed.
+- `pnpm test`: 76 suites, 1793 tests passed.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exported one Android Hermes bundle (3.7 MB); `dist/` is not ignored and was deleted.
+- Decisions:
+  - Restore runs in three steps: check with the passphrase, read what `prepareRestore` reports (date, accounts, transactions, an upgrade note, and that everything is replaced), then type `REPLACE` and accept a destructive alert. Any edit to the text or passphrase discards the check, so what is replaced is always what was shown.
+  - The passphrase lives only in component state and is cleared after each export or check, whatever the outcome. Errors shown are the service's fixed messages, which never include it.
+  - After a successful restore the provider reopens services through its existing `attempt` counter, the same path as its retry: migrations, `ledger.initialize`, `purgeExpired`, and `materializeDue` run over the restored database, and every screen remounts.
+  - Strength and matching of the passphrase stay with `checkPassphrase`; the model only waits for both fields so the service's message is the one shown.
+- Not run: no device run or screen render test; there is no render test library. Reopening opens a second `expo-sqlite` handle without closing the first, as the existing retry path already does; that is unverified on a device.
+
 ## Next step
 
-T8c: release. CI, docs, store listing, privacy policy, and the Data screen entry point for backup export and restore. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.
+T8c.2 to T8c.4: README and privacy policy, CI, and store listing copy. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.

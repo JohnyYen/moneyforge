@@ -29,6 +29,17 @@ export function DataSettingsScreen() {
         subtitle="Share your rules, without your messages or accounts"
         onPress={() => router.push('/data/pack-export')}
       />
+      <SectionLabel>Backup</SectionLabel>
+      <ListRow
+        title="Export a backup"
+        subtitle="Your whole ledger, encrypted with a passphrase"
+        onPress={() => router.push('/data/backup-export')}
+      />
+      <ListRow
+        title="Restore a backup"
+        subtitle="Replace everything here with a backup, after a check"
+        onPress={() => router.push('/data/backup-restore')}
+      />
     </Screen>
   );
 }
