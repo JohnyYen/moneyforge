@@ -5,6 +5,12 @@ import {
   assetRulePostHook,
   createSqliteAssetStore,
 } from '@/features/assets/infrastructure/sqlite-asset-store';
+import { createBackupService } from '@/features/backup/application/backup-service';
+import type {
+  BackupCipher,
+  BackupTransport,
+} from '@/features/backup/application/ports';
+import { createSqliteBackupStore } from '@/features/backup/infrastructure/sqlite-backup-store';
 import { createLedgerService } from '@/features/ledger/application/ledger-service';
 import type { Clock, IdGenerator } from '@/features/ledger/application/ports';
 import {
@@ -40,6 +46,8 @@ import {
   splitChangeGuard,
 } from '@/features/split/infrastructure/sqlite-split-store';
 import type { SqlExecutor } from '@/shared/persistence/sql-driver';
+import { migrations as defaultMigrations } from '@/shared/persistence/migrations';
+import type { Migration } from '@/shared/persistence/migrator';
 
 const currencyUsage: CurrencyUsageFactory = (sql) => {
   const [planning, assets] = [planningCurrencyUsage(sql), assetCurrencyUsage(sql)];
@@ -72,6 +80,10 @@ export function createAppServices(deps: {
   readonly messageCapture?: MessageCapturePort;
   readonly onChainClient?: OnChainClient;
   readonly expectedSources?: readonly ExpectedCashFlowSource[];
+  readonly backupCipher?: BackupCipher;
+  readonly backupTransport?: BackupTransport;
+  /** The migrations a restore may run, so a test can stand at an older version. */
+  readonly backupMigrations?: readonly Migration[];
 }) {
   const { driver, clock, generateId, generateSecret } = deps;
   const rules = createRulesService({
@@ -115,6 +127,13 @@ export function createAppServices(deps: {
       generateId,
       // One secret to carry through a backup, or stored keys would stop matching.
       loadSecret: rules.loadDedupSecret,
+    }),
+    backup: createBackupService({
+      store: createSqliteBackupStore(driver, deps.backupMigrations ?? defaultMigrations),
+      cipher: deps.backupCipher,
+      transport: deps.backupTransport,
+      clock,
+      capture,
     }),
   };
 }

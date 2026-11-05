@@ -65,7 +65,7 @@ Review base for the next candidate: `a3af194`.
 - [x] T7b On-chain balances: read-only balances by public address. Commits: `abdcd66` (T7a.1 advisory), `c717c4b`, and the `feat(onchain): add the on-chain screens` commit that records this line.
 - [x] T8a CSV and rule packs: T7b advisories, CSV import and export, shareable rule packs, Data screen. Rule packs exclude samples. Commits: `c383635` (advisories), `d6144b0`, and the `feat(rules): add shareable rule packs` commit that records this line.
 - [x] T8a.1 T8a hardening: verified findings on packs taking over a source, rule selection stopping at a failure, CSV preview and undo, export round trips, all-accounts files, packs storing personal senders, dates, caps, fallbacks, control characters, and semicolon formulas. Commits: `c20c997`, and the `fix(transfer): show what an import will do, undo it, and survive a round trip` commit that records this line.
-- [ ] T8b Backup: encrypted export and import. Backup must carry `rules.dedup_secret` and `imported_rows`, or every stored dedup key and import fingerprint stops matching after a restore. A chain endpoint may hold an API key, so a plain export must leave `onchain_chains.endpoint` out or say so.
+- [x] T8b Backup: encrypted export and import. Backup carries `rules.dedup_secret` and `imported_rows` with `batch_id`; `onchain_chains.endpoint` travels only inside the encrypted payload, never in the clear container.
 - [ ] T8c Release: CI, docs, store listing, privacy policy.
 
 ## Acceptance criteria
@@ -525,6 +525,28 @@ T8a.1 evidence:
   - A category exported with a leading apostrophe still imports with it, as a name match. Only `rowIdentity` folds.
   - The batch test now forces a failure with a SQL trigger, because checking fallbacks in the plan removed the only way to fail mid-write. `BatchRefused` stays as a defensive path.
 
+T8b done. Route: inline direct; sub-agent delegation was unavailable (provider usage limit), recorded rather than skipped silently. The four RED suites were the spec; two setup lines were repaired where they contradicted the shipped schema and the test runner: `seed` updates the already-seeded USDT to 18 decimals instead of creating it again, and the mocked `AESSealedData` assigns its fields instead of using parameter properties, which Babel refuses inside `jest.mock`.
+
+T8b evidence:
+
+- RED before implementation: the four suites failed to resolve `./backup-container`, `./backup-snapshot`, and `./backup-service`; after the domain and service modules existed, 36 of 114 failed.
+- GREEN: `pnpm test`: 75 suites, 1786 tests passed, including the four backup suites at 120 tests.
+- `pnpm typecheck`: exit 0.
+- `pnpm lint`: exit 0.
+- Container is `MONEYFORGE-BACKUP.1.<headerB64>.<ciphertextB64>`, with the header authenticated as AES-GCM additional data. Any changed character, flipped ciphertext bit, rewritten header, or trailing cut fails to open.
+- KDF is noble scrypt with `N=32768, r=8, p=1, dkLen=32`, bounded to `N` a power of two in `[2**14, 2**20]`; the header carries the cost so a reader uses what the writer used. Production seals through `expo-crypto`; a Node cipher proves both directions read each other.
+- A restore drops and rebuilds the schema from the file's own version inside one transaction, then runs the remaining migrations over the restored rows. Foreign keys are checked before commit, so a dangling row rolls everything back. A broken later migration also rolls back the rebuild.
+- `inbox_items` exports only rows still awaiting a decision and always with `body` null; `validateSnapshot` refuses any other message text.
+- Decisions:
+  - `onchain_chains.endpoint` stays in the encrypted payload, because losing it would silently break a restored chain. Nothing of it appears in the clear container, which carries only the format, schema version, KDF, salt, and nonce.
+  - `schema_migrations` is excluded and rebuilt: a file never dictates which migrations the app believes it ran.
+  - A backup is read back before it is shared, so a file that cannot open on the device that wrote it never leaves. Past the transport's `maxChars` it is refused, naming the limit.
+  - With no transport wired the export refuses plainly; the app never claims a backup it could not hand over.
+  - Restore is typed `REPLACE`; anything else, including a near miss, writes nothing.
+  - After a restore, capture is told the restored senders, so an allowlist from the old ledger cannot outlive it.
+- Mutations covered by the suites: a wrong or missing passphrase, a newer schema refused before the KDF, an unbalanced journal, unknown or injected columns, an empty required cell, a table the schema does not know, an older file checked against its own schema, a failed migration, a foreign-key violation, a transport too small, a cipher that cannot reopen, and no transport at all.
+- Not run: no device run, Gradle build, or screen rendering test. The backup has no screen yet; export and restore are services, tested on `node:sqlite` and `node:crypto` only. `expo-crypto` AES is exercised against a mocked native module, not on a device.
+
 ## Next step
 
-T8b: encrypted backup, carrying `rules.dedup_secret` and `imported_rows`, including `batch_id`. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, and the Data screens, including `Share` with a large CSV.
+T8c: release. CI, docs, store listing, privacy policy, and the Data screen entry point for backup export and restore. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.
