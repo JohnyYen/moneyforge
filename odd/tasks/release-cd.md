@@ -32,7 +32,7 @@ Out of scope: the Google Play upload job (deferred by the user), F-Droid or Izzy
 
 - [x] R1 Release signing config plugin, registered in `app.config.ts`, with tests.
 - [x] R2 Release workflow: tag `v*` builds both variants, signs, and publishes a GitHub Release; `workflow_dispatch` builds artifacts only.
-- [ ] R3 First dry run on GitHub, fix what the first native compile reveals.
+- [x] R3 First dry run on GitHub, fix what the first native compile reveals.
 - [ ] R4 README install and release instructions.
 
 ## Acceptance criteria
@@ -156,3 +156,12 @@ Run 42118910709 on `feat/release-cd` (branch push, so debug-signed check builds)
 - Warnings come only from dependencies (Node deprecations in setup, `android.builtInKotlin` and `android.newDsl` deprecations, Kotlin warnings in safe-area-context, worklets and reanimated).
 
 Still pending for R3: a signed build from a trusted ref (`main` via `workflow_dispatch`, or a `v*` tag) to prove the certificate check, and a device install.
+
+## R3 done: signed build from main
+
+- Run 42122009651 (`workflow_dispatch` on `main`) signed both APKs with the release key. `apksigner` printed `certificate SHA-256 digest: 9cf334a2...93b2` and DN `CN=MoneyForge, O=JohnyYen`, but the check failed: `awk -F': '` took field 2 (`certificate SHA-256 digest`) instead of the hash, because the line has two `: ` separators.
+- Fix: print `$NF`. Tested locally against the real line from that run. Commit: `fix(ci): read the certificate digest from the last field of apksigner output`.
+- Run 42125469502 (`workflow_dispatch` on `main`): verify version, build play, build full all success; certificate check passed; artifacts `apk-play` and `apk-full`, about 37 MB each. Release job skipped, as expected for a manual run.
+- Route: inline (one-line mechanical fix after reading the run log).
+
+Not run: no device install yet, and no `v*` tag pushed, so the release job and the tag/version mismatch guard have only run locally.
