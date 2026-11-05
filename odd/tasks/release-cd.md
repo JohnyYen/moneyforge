@@ -145,3 +145,14 @@ Commit: `ci: build unsigned on branches, sign only trusted refs, pin actions`.
 ## Next step
 
 R3: push the branch so the path-filtered push builds unsigned check APKs, and fix what the first native compile reveals.
+
+## R3 part 2: first native build on GitHub
+
+Run 42118910709 on `feat/release-cd` (branch push, so debug-signed check builds), 2026-11-05 22:08 to 22:27 UTC:
+- Verify version: success.
+- Build play: success in 18 minutes. Build full: success in 19 minutes.
+- `:message-capture:compileReleaseKotlin` ran in both variants with no `w:` or `e:` lines, so the Kotlin capture module compiles for the first time.
+- Artifacts: `unsigned-check-apk-play` and `unsigned-check-apk-full`, about 37 MB each.
+- Warnings come only from dependencies (Node deprecations in setup, `android.builtInKotlin` and `android.newDsl` deprecations, Kotlin warnings in safe-area-context, worklets and reanimated).
+
+Still pending for R3: a signed build from a trusted ref (`main` via `workflow_dispatch`, or a `v*` tag) to prove the certificate check, and a device install.
