@@ -76,7 +76,7 @@ jobs:
       APP_VARIANT: ${{ matrix.variant }}
       TRUSTED: ${{ needs.verify-version.outputs.trusted }}
       # A debug-signed check build carries a suffix so it is never mistaken for a release.
-      APK_NAME: moneyforge-${{ matrix.variant }}-${{ needs.verify-version.outputs.version }}${{ needs.verify-version.outputs.trusted != 'true' && '-unsigned-check' || '' }}.apk
+      APK_NAME: moneyforge-${{ matrix.variant }}${{ needs.verify-version.outputs.trusted != 'true' && '-unsigned-check' || '' }}.apk
       # Certificate of ~/.config/moneyforge/release.jks, uppercase hex without colons.
       EXPECTED_CERT_SHA256: 9CF334A228C75EDFABE7DD5954EC4E6AC55F1C0C6DBA8340B32C4C95974F93B2
     steps:
@@ -204,12 +204,12 @@ jobs:
           cat > "$RUNNER_TEMP/notes.md" <<EOF
           ## Which APK to install
 
-          - \`moneyforge-play-$VERSION.apk\`: the standard app. It asks for no SMS permission; you add movements by hand or by sharing a bank message to MoneyForge.
-          - \`moneyforge-full-$VERSION.apk\`: everything in play, plus opt-in SMS capture. It asks for permission to receive SMS and only reads messages after you turn capture on.
+          - \`moneyforge-play.apk\`: the standard app. It asks for no SMS permission; you add movements by hand or by sharing a bank message to MoneyForge.
+          - \`moneyforge-full.apk\`: everything in play, plus opt-in SMS capture. It asks for permission to receive SMS and only reads messages after you turn capture on.
 
           Both are signed with the same release key. Check downloads against \`SHA256SUMS.txt\`.
           EOF
-          assets=(moneyforge-play-"$VERSION".apk moneyforge-full-"$VERSION".apk SHA256SUMS.txt)
+          assets=(moneyforge-play.apk moneyforge-full.apk SHA256SUMS.txt)
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "Release $TAG exists; replacing its assets."
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"

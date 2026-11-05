@@ -33,7 +33,7 @@ Out of scope: the Google Play upload job (deferred by the user), F-Droid or Izzy
 - [x] R1 Release signing config plugin, registered in `app.config.ts`, with tests.
 - [x] R2 Release workflow: tag `v*` builds both variants, signs, and publishes a GitHub Release; `workflow_dispatch` builds artifacts only.
 - [x] R3 First dry run on GitHub, fix what the first native compile reveals.
-- [ ] R4 README install and release instructions.
+- [x] R4 README install and release instructions.
 
 ## Acceptance criteria
 
@@ -165,3 +165,10 @@ Still pending for R3: a signed build from a trusted ref (`main` via `workflow_di
 - Route: inline (one-line mechanical fix after reading the run log).
 
 Not run: no device install yet, and no `v*` tag pushed, so the release job and the tag/version mismatch guard have only run locally.
+
+## R4 done, and version-less asset names
+
+- The user wants the Ikizen landing page link to always download the newest release. GitHub serves `/releases/latest/download/<asset>` only for a stable asset name, so trusted APKs are now `moneyforge-play.apk` and `moneyforge-full.apk`; the version lives in the tag. Untrusted check builds keep the `-unsigned-check` suffix.
+- README gains Install (direct latest links for both variants, checksums, certificate fingerprint) and Release (bump version, push matching tag) sections, and the Status text now says both variants build and sign on GitHub Actions.
+- Route: inline (two mechanical edits after the decision).
+- Verification: YAML parses with js-yaml.

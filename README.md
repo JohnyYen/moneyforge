@@ -8,7 +8,26 @@ MoneyForge never moves real money and never holds custody of funds.
 
 ## Status
 
-Pre-release. The JavaScript is type-checked, linted, and tested, and an Android bundle exports, but the native Android build has not yet been verified on a device. The SMS capture module has not been compiled yet. Android is the only target.
+Pre-release. The JavaScript is type-checked, linted, and tested. Both Android variants, including the SMS capture module, build and are signed on GitHub Actions, but the app has not yet been verified on a device. Android is the only target.
+
+## Install
+
+Download the latest APK from [GitHub Releases](https://github.com/JohnyYen/moneyforge/releases/latest):
+
+- [`moneyforge-full.apk`](https://github.com/JohnyYen/moneyforge/releases/latest/download/moneyforge-full.apk): everything, plus opt-in SMS capture. It asks for permission to receive SMS and reads nothing until you turn capture on.
+- [`moneyforge-play.apk`](https://github.com/JohnyYen/moneyforge/releases/latest/download/moneyforge-play.apk): the same app without SMS capture. You add movements by hand or by sharing a bank message to MoneyForge.
+
+Both links always point to the newest release. Android asks you to allow installs from your browser the first time. Each release lists SHA-256 checksums in `SHA256SUMS.txt`, and every APK is signed with the same key (certificate SHA-256 `9C:F3:34:A2:28:C7:5E:DF:AB:E7:DD:59:54:EC:4E:6A:C5:5F:1C:0C:6D:BA:83:40:B3:2C:4C:95:97:4F:93:B2`), so updates install over the previous version.
+
+## Release
+
+Bump `version` in `app.config.ts`, commit, then push a matching tag:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The `Release` workflow refuses a tag that does not match `version`, builds and signs both variants, checks the signing certificate, and publishes the release with both APKs and `SHA256SUMS.txt`. Pushes to other branches that touch native code build unsigned check APKs only.
 
 ## Features
 
