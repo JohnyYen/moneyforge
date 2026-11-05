@@ -105,6 +105,43 @@ Not run: no native build ran. The first compile happens in R3 on GitHub.
 
 Commit: `ci: publish signed APKs to GitHub Releases on version tags`.
 
+## R3 part 1
+
+Route: delegated writer (two workflow files plus this document).
+
+Why: `workflow_dispatch` cannot run a workflow that is not on the default branch, and the dry run must not touch `main`. The approved R1/R2 review also left non-blocking advisories.
+
+What changed:
+- `release.yml` triggers: one `push` key with `branches-ignore: [main]`, `tags: ['v*']`, and `paths` limited to `.github/workflows/release.yml`, `plugins/**`, `modules/**`, `app.config.ts`, `package.json`, `pnpm-lock.yaml`. `workflow_dispatch` stays.
+- `verify-version` outputs `trusted`: true only for `refs/tags/v*` or `refs/heads/main`.
+- `build`: decode keystore, signed assemble, and certificate check run only when trusted; those are the only steps that receive signing secrets. Untrusted refs run a separate assemble step with no secret env, so the plugin falls back to debug signing. A trusted ref without `ANDROID_KEYSTORE_BASE64` now fails instead of warning (this replaces the separate "Refuse to publish an unsigned build" step).
+- Untrusted builds are named `moneyforge-<variant>-<version>-unsigned-check.apk` and uploaded as `unsigned-check-apk-<variant>`. The release job downloads `apk-*` only and runs only on a `refs/tags/v*` push, so check builds never reach a release.
+- `release`: if the release already exists, `gh release upload --clobber` replaces its assets; otherwise `gh release create` as before.
+- Every action in `release.yml` and `ci.yml` is pinned to a commit SHA with a version comment.
+
+Decisions:
+- GitHub does not evaluate `paths` for tag pushes, so one `push` key expresses both: every `v*` tag runs, and `paths` only filters branch pushes. `branches-ignore` and `tags` can coexist; only `branches` with `branches-ignore` cannot.
+- Pushes to `main` do not trigger the workflow; main signs only through a manual run.
+- R2 readability suggestions (version regex, digest pipeline, plugin config block, test count) were left as they are: without a concrete change they were not clearly better, and leaving the plugin untouched keeps its tests unchanged.
+
+SHA mapping (resolved with `gh api .../git/ref/tags/<tag>`, annotated tags dereferenced):
+- `actions/checkout` v5 → `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09` (v5.1.0)
+- `pnpm/action-setup` v4 → `b906affcce14559ad1aafd4ab0e942779e9f58b1` (v4.3.0, annotated)
+- `actions/setup-node` v5 → `a0853c24544627f65ddf259abe73b1d18a591444` (v5.0.0)
+- `actions/setup-java` v5 → `b6effb05e454b25005698d916606bdc6ffcbf961` (v5.7.0)
+- `gradle/actions/setup-gradle` v4 → `ed408507eac070d1f99cc633dbcf757c94c7933a` (v4.4.3, tag of a tag)
+- `actions/upload-artifact` v4 → `ea165f8d65b6e75b540449e92b4886f43607fa02` (v4.6.2)
+- `actions/download-artifact` v4 → `d3f86a106a0bac45b974a628896c90dbdf5c8093` (v4.3.0)
+
+Verification:
+- YAML parse with `js-yaml`: the trigger structure above, trusted-only steps guarded by `env.TRUSTED == 'true'`, the debug-signed assemble step without secret env.
+- `pnpm test`: 77 suites, 1814 tests passed. `pnpm typecheck` and `pnpm lint`: clean.
+- `actionlint` is not installed, so it did not run.
+
+Not run: the GitHub run. R3 stays open until a branch push builds both variants.
+
+Commit: `ci: build unsigned on branches, sign only trusted refs, pin actions`.
+
 ## Next step
 
-R3: push the branch, run the workflow manually, and fix what the first native compile reveals.
+R3: push the branch so the path-filtered push builds unsigned check APKs, and fix what the first native compile reveals.

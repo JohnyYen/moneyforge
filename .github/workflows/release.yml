@@ -1,10 +1,22 @@
 name: Release
 
 # A version tag builds both variants, signs them, and publishes a GitHub Release.
-# A manual run is a dry run: it builds and uploads workflow artifacts, never a release.
+# A branch push that touches native or release inputs is a compile check: it builds
+# debug-signed release APKs and never sees the signing secrets.
+# A manual run builds artifacts only; it signs when run from main or a v* tag.
 on:
+  # GitHub never evaluates `paths` for tag pushes, so every v* tag runs.
+  # `paths` only filters the branch pushes that `branches-ignore` lets through.
   push:
+    branches-ignore: [main]
     tags: ['v*']
+    paths:
+      - .github/workflows/release.yml
+      - plugins/**
+      - modules/**
+      - app.config.ts
+      - package.json
+      - pnpm-lock.yaml
   workflow_dispatch:
 
 permissions:
@@ -22,9 +34,11 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
+      # Only a v* tag or main may sign. Every other ref builds with debug signing.
+      trusted: ${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       # Read with a regex rather than evaluating the config, so this job needs no install.
       - name: Read version from app.config.ts
@@ -60,27 +74,29 @@ jobs:
         variant: [play, full]
     env:
       APP_VARIANT: ${{ matrix.variant }}
-      APK_NAME: moneyforge-${{ matrix.variant }}-${{ needs.verify-version.outputs.version }}.apk
+      TRUSTED: ${{ needs.verify-version.outputs.trusted }}
+      # A debug-signed check build carries a suffix so it is never mistaken for a release.
+      APK_NAME: moneyforge-${{ matrix.variant }}-${{ needs.verify-version.outputs.version }}${{ needs.verify-version.outputs.trusted != 'true' && '-unsigned-check' || '' }}.apk
       # Certificate of ~/.config/moneyforge/release.jks, uppercase hex without colons.
       EXPECTED_CERT_SHA256: 9CF334A228C75EDFABE7DD5954EC4E6AC55F1C0C6DBA8340B32C4C95974F93B2
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 10.34.9
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 26.4.0
           cache: pnpm
 
       # AGP 9.2 (React Native 0.88) needs JDK 17 or newer, and its Gradle plugins use a JDK 17 toolchain.
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '17'
@@ -88,7 +104,7 @@ jobs:
       # The runner image ships the Android SDK with accepted licenses; AGP downloads
       # the exact platform, build tools, and NDK it needs.
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -96,28 +112,22 @@ jobs:
       - name: Prebuild
         run: pnpm expo prebuild --platform android --no-install --clean
 
+      # Signing steps run only on trusted refs, so no other ref ever receives the secrets.
       - name: Decode keystore
-        id: keystore
+        if: env.TRUSTED == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; release builds fall back to debug signing."
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error::A build from $GITHUB_REF must be signed, but ANDROID_KEYSTORE_BASE64 is not set."
+            exit 1
           fi
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
           echo "MONEYFORGE_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          echo "signed=true" >> "$GITHUB_OUTPUT"
-
-      - name: Refuse to publish an unsigned build
-        if: steps.keystore.outputs.signed != 'true' && startsWith(github.ref, 'refs/tags/')
-        run: |
-          echo "::error::A tag build must be signed with the release keystore."
-          exit 1
 
       # The signing config only takes effect when MONEYFORGE_KEYSTORE_PATH is set above.
-      - name: Assemble release APK
+      - name: Assemble signed release APK
+        if: env.TRUSTED == 'true'
         working-directory: android
         env:
           MONEYFORGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -125,8 +135,14 @@ jobs:
           MONEYFORGE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon
 
+      # Without MONEYFORGE_KEYSTORE_PATH the plugin falls back to debug signing.
+      - name: Assemble debug-signed release APK
+        if: env.TRUSTED != 'true'
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
       - name: Verify signing certificate
-        if: steps.keystore.outputs.signed == 'true'
+        if: env.TRUSTED == 'true'
         run: |
           build_tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
           apk=android/app/build/outputs/apk/release/app-release.apk
@@ -144,9 +160,10 @@ jobs:
           mv android/app/build/outputs/apk/release/app-release.apk "dist/$APK_NAME"
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: apk-${{ matrix.variant }}
+          # The release job downloads apk-* only, so check builds can never be published.
+          name: ${{ env.TRUSTED == 'true' && 'apk' || 'unsigned-check-apk' }}-${{ matrix.variant }}
           path: dist/${{ env.APK_NAME }}
           if-no-files-found: error
 
@@ -157,14 +174,14 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: [verify-version, build]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
       - name: Download APKs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: apk-*
           path: dist
@@ -176,7 +193,8 @@ jobs:
           sha256sum *.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Create release
+      # A re-run replaces the assets of an existing release instead of failing.
+      - name: Create or update release
         working-directory: dist
         env:
           GH_TOKEN: ${{ github.token }}
@@ -191,12 +209,16 @@ jobs:
 
           Both are signed with the same release key. Check downloads against \`SHA256SUMS.txt\`.
           EOF
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --title "MoneyForge $TAG" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
-            --generate-notes \
-            moneyforge-play-"$VERSION".apk \
-            moneyforge-full-"$VERSION".apk \
-            SHA256SUMS.txt
+          assets=(moneyforge-play-"$VERSION".apk moneyforge-full-"$VERSION".apk SHA256SUMS.txt)
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $TAG exists; replacing its assets."
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "MoneyForge $TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              --generate-notes \
+              "${assets[@]}"
+          fi
