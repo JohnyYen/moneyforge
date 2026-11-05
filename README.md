@@ -6,6 +6,31 @@ MoneyForge is built for people who keep money in several fiat currencies and sta
 
 MoneyForge never moves real money and never holds custody of funds.
 
+## Status
+
+Pre-release. The JavaScript is type-checked, linted, and tested, and an Android bundle exports, but the native Android build has not yet been verified on a device. The SMS capture module has not been compiled yet. Android is the only target.
+
+## Features
+
+| Area | What it does |
+|------|--------------|
+| [Ledger](#ledger) | Accounts in several fiat currencies and stablecoins, transfers, conversions, and reconciliation, on a hidden double-entry journal. |
+| [Income split](#income-split) | Split an income by percentage into a list of moves to make. |
+| [Message rules](#message-rules) and [capture](#message-capture) | Turn bank messages into transactions with rules you write, through paste, share, or opt-in SMS capture. |
+| [Planning](#planning) | Flexible budgets, recurring items, and a cash flow projection. |
+| [Assets](#assets) | Assets with expected and actual cash flow, reports, and a portfolio total. |
+| [On-chain balances](#on-chain-balances) | Read-only token balances by public address, from endpoints you configure. |
+| [Data](#data) | CSV import and export, shareable rule packs, and encrypted backups. |
+
+## Privacy
+
+- Your data stays in a database on your device. There are no accounts, analytics, or ads.
+- The only network requests are on-chain balance reads. They are off until you turn them on, and run only when you press Refresh.
+- Android cloud backup is turned off for the app's data.
+- Exports leave the device only through the share sheet, to where you choose. Backups are encrypted with your passphrase.
+
+Read the full [privacy policy](docs/privacy-policy.md).
+
 ## Stack
 
 - Expo SDK 58 with Expo Router, React Native, and TypeScript in strict mode
@@ -30,6 +55,8 @@ pnpm test
 pnpm typecheck
 pnpm lint
 ```
+
+CI runs the same checks on every push and pull request, then exports the Android bundle with `EXPO_OFFLINE=1 pnpm expo export --platform android`. See [the workflow](.github/workflows/ci.yml).
 
 ## Build variants
 
@@ -169,6 +196,19 @@ Each imported row keeps a keyed fingerprint of its account, day, kind, amount, a
 CSV export writes one row per account a transaction touched, with exact amounts. Text that a spreadsheet would run as a formula is neutralized with an apostrophe, also after a `;`, and importing an export back still matches the original rows. It uses the system share sheet, so it carries text and refuses more than 200,000 characters rather than cutting it short.
 
 Rule packs share sources and rules with no personal data. See [rule-packs](rule-packs/README.md).
+
+An encrypted backup holds all app data in one file, sealed with AES-GCM under a key derived from your passphrase with scrypt. Messages still awaiting a decision travel without their text. A backup is read back before it is shared. Restoring checks the file with the passphrase, shows what it holds, and replaces everything only after you type `REPLACE`.
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a pull request:
+
+1. Keep the change inside its feature folder, following the [architecture](#architecture).
+2. Add tests for domain and application behavior.
+3. Run `pnpm test`, `pnpm typecheck`, and `pnpm lint`.
+4. Write commit messages as [Conventional Commits](https://www.conventionalcommits.org/).
+
+To share rules for a bank, see [contributing a pack](rule-packs/README.md#contributing-a-pack).
 
 ## License
 

@@ -67,7 +67,8 @@ Review base for the next candidate: `a3af194`.
 - [x] T8a.1 T8a hardening: verified findings on packs taking over a source, rule selection stopping at a failure, CSV preview and undo, export round trips, all-accounts files, packs storing personal senders, dates, caps, fallbacks, control characters, and semicolon formulas. Commits: `c20c997`, and the `fix(transfer): show what an import will do, undo it, and survive a round trip` commit that records this line.
 - [x] T8b Backup: encrypted export and import. Backup carries `rules.dedup_secret` and `imported_rows` with `batch_id`; `onchain_chains.endpoint` travels only inside the encrypted payload, never in the clear container.
 - [x] T8c.1 Data screen backup export and restore. Commit: the `feat(backup): add Data screen backup export and restore` commit that records this line.
-- [ ] T8c.2 Docs: README and privacy policy
+- [ ] T8c.1b Review advisories: clear the export passphrase on failure, discard a restore check whose inputs changed while it ran, close the old database handle on reopen, cover the screen invariants.
+- [x] T8c.2 Docs: README and privacy policy. Commit: the `docs: add privacy policy and README overview` commit that records this line.
 - [x] T8c.3 CI: typecheck, lint, test, Android export. Commit: the `ci: add typecheck, lint, test and Android export workflow` commit that records this line.
 - [ ] T8c.4 Store listing copy
 
@@ -560,7 +561,7 @@ T8c.1 evidence:
 - `pnpm test`: 76 suites, 1793 tests passed.
 - `pnpm typecheck`: exit 0.
 - `pnpm lint`: exit 0.
-- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exported one Android Hermes bundle (3.7 MB); `dist/` is not ignored and was deleted.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exported one Android Hermes bundle (3.7 MB); `dist/` was deleted. It is ignored by `.gitignore` line 3 (corrected in T8c.3).
 - Decisions:
   - Restore runs in three steps: check with the passphrase, read what `prepareRestore` reports (date, accounts, transactions, an upgrade note, and that everything is replaced), then type `REPLACE` and accept a destructive alert. Any edit to the text or passphrase discards the check, so what is replaced is always what was shown.
   - The passphrase lives only in component state and is cleared after each export or check, whatever the outcome. Errors shown are the service's fixed messages, which never include it.
@@ -583,6 +584,17 @@ T8c.3 evidence:
 - `EXPO_OFFLINE=1 pnpm expo export --platform android`: exit 0, one 3.7 MB Hermes bundle. `git status` did not list `dist/`, which was then deleted.
 - Not run: the workflow never ran on GitHub (no remote). The action major versions, the Node 26.4.0 download, and the pnpm cache are unverified there.
 
+T8c.2 done. Route: delegated direct, one bounded writer. Test-first does not apply: passive documentation, so structural checks replace RED and GREEN.
+
+T8c.2 evidence:
+
+- What changed: `docs/privacy-policy.md` is new, effective 2026-11-05, with a `<contact email>` placeholder. `README.md` gains Status, Features, Privacy, a CI note, a backup paragraph under Data, and Contributing.
+- `LICENSE` was not changed: it is the verbatim GNU GPL version 3 text from the first commit, byte-identical in md5 to the FSF `gpl-3.0.txt` (`1ebbd3e34237af26da5dc08a4e440464`), 674 lines from the "Version 3, 29 June 2007" header to the "How to Apply" section.
+- License id kept as `GPL-3.0-or-later` in `package.json` and the README, matching the recorded decision above. The request to switch to `GPL-3.0-only` assumed the user never said "or later", which this file contradicts; the user confirms which applies.
+- Privacy claims were checked against the code: the only `fetch` is `src/features/onchain/infrastructure/fetch-onchain-client.ts`, gated by `onchain.network_enabled` in `watch-use-cases.ts`; `allowBackup: false` in `app.config.ts`; `RECEIVE_SMS` only through `plugins/with-message-capture.js` for `full`, capture off by default in `CapturePreferences.kt`, senders off the allowlist dropped in `SmsCaptureReceiver.kt`; retention default 30 days in `message-settings.ts`, purge in `sqlite-rule-repository.ts`; bodies cleared on post and rejection in `inbox-flow.ts` and `inbox-item.ts`; CSV columns in `csv-export.ts`; no analytics, ads, or crash reporting in `package.json`.
+- Every relative link and heading anchor in the README resolves.
+- Not verified: the merged release manifest. The ignored `android/` prebuild declares `INTERNET`, `SYSTEM_ALERT_WINDOW`, `VIBRATE`, and legacy storage permissions from the Expo template; the policy lists only Internet and Receive SMS until a release build confirms the set. Device-to-device transfer on Android 12 and later is described as "may copy", unproven on a device.
+
 ## Next step
 
-T8c.2 and T8c.4: README and privacy policy, and store listing copy. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.
+T8c.1b review advisories, then T8c.4 store listing copy. Before publishing, fill `<contact email>` in the privacy policy and confirm the license id. T5 stays open until a toolchain exists: compile the Kotlin, build both variants with `APP_VARIANT`, inspect each merged manifest, and on a device test a share, a real SMS with the app closed, a multipart SMS, permission denial, restricted settings, and the drain. Also run the ledger, split, rules, Plan, and Assets screens there, including migrations 002 to 007 over an existing database under `expo-sqlite`. Also run the On-chain screens there, with `fetch`, timeouts, and the reconcile prefill under Hermes, the Data screens, including `Share` with a large CSV, and a backup export and restore under `expo-crypto` and `expo-sqlite`.
