@@ -74,4 +74,4 @@ Changes are published in this file, in the MoneyForge source repository, with a 
 
 ## Contact
 
-Questions about this policy: `<contact email>`
+Questions about this policy: open an issue at <https://github.com/JohnyYen/moneyforge/issues>.

@@ -123,9 +123,9 @@ On-chain reads go to a third-party endpoint the user configures, at the user's e
 
 ## Contact and links
 
-- Contact email: `<contact email>`
-- Privacy policy URL: `<privacy policy URL>`
-- Website or source repository: `<repository URL>`
+- Contact: <https://github.com/JohnyYen/moneyforge/issues> (Google Play also requires a contact email address; still to be decided)
+- Privacy policy URL: <https://github.com/JohnyYen/moneyforge/blob/main/docs/privacy-policy.md>
+- Website or source repository: <https://github.com/JohnyYen/moneyforge>
 
 ## Required assets
 
