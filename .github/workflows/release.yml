@@ -1,0 +1,202 @@
+name: Release
+
+# A version tag builds both variants, signs them, and publishes a GitHub Release.
+# A manual run is a dry run: it builds and uploads workflow artifacts, never a release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never abandon a tag build halfway through publishing.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  verify-version:
+    name: Verify version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Read with a regex rather than evaluating the config, so this job needs no install.
+      - name: Read version from app.config.ts
+        id: version
+        run: |
+          version=$(node -e "
+            const match = require('fs').readFileSync('app.config.ts', 'utf8').match(/^\s*version: '([^']+)',$/m);
+            if (!match) { console.error('No version found in app.config.ts'); process.exit(1); }
+            console.log(match[1]);
+          ")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "app.config.ts version: $version"
+
+      - name: Check the tag matches
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ "${TAG#v}" != "$VERSION" ]; then
+            echo "::error::Tag $TAG does not match version $VERSION in app.config.ts"
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.variant }}
+    needs: verify-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [play, full]
+    env:
+      APP_VARIANT: ${{ matrix.variant }}
+      APK_NAME: moneyforge-${{ matrix.variant }}-${{ needs.verify-version.outputs.version }}.apk
+      # Certificate of ~/.config/moneyforge/release.jks, uppercase hex without colons.
+      EXPECTED_CERT_SHA256: 9CF334A228C75EDFABE7DD5954EC4E6AC55F1C0C6DBA8340B32C4C95974F93B2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.9
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 26.4.0
+          cache: pnpm
+
+      # AGP 9.2 (React Native 0.88) needs JDK 17 or newer, and its Gradle plugins use a JDK 17 toolchain.
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The runner image ships the Android SDK with accepted licenses; AGP downloads
+      # the exact platform, build tools, and NDK it needs.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prebuild
+        run: pnpm expo prebuild --platform android --no-install --clean
+
+      - name: Decode keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; release builds fall back to debug signing."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "MONEYFORGE_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to publish an unsigned build
+        if: steps.keystore.outputs.signed != 'true' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "::error::A tag build must be signed with the release keystore."
+          exit 1
+
+      # The signing config only takes effect when MONEYFORGE_KEYSTORE_PATH is set above.
+      - name: Assemble release APK
+        working-directory: android
+        env:
+          MONEYFORGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          MONEYFORGE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          MONEYFORGE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Verify signing certificate
+        if: steps.keystore.outputs.signed == 'true'
+        run: |
+          build_tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          "$build_tools/apksigner" verify --print-certs "$apk" | tee "$RUNNER_TEMP/certs.txt"
+          digests=$(grep -i 'certificate SHA-256 digest' "$RUNNER_TEMP/certs.txt" \
+            | awk -F': ' '{ print $2 }' | tr -d ':' | tr '[:lower:]' '[:upper:]' | sort -u)
+          if [ "$digests" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::Signing certificate SHA-256 is '$digests', expected $EXPECTED_CERT_SHA256"
+            exit 1
+          fi
+
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          mv android/app/build/outputs/apk/release/app-release.apk "dist/$APK_NAME"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.variant }}
+          path: dist/${{ env.APK_NAME }}
+          if-no-files-found: error
+
+      - name: Delete keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+  release:
+    name: Publish GitHub Release
+    needs: [verify-version, build]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download APKs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: apk-*
+          path: dist
+          merge-multiple: true
+
+      - name: Write checksums
+        working-directory: dist
+        run: |
+          sha256sum *.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<EOF
+          ## Which APK to install
+
+          - \`moneyforge-play-$VERSION.apk\`: the standard app. It asks for no SMS permission; you add movements by hand or by sharing a bank message to MoneyForge.
+          - \`moneyforge-full-$VERSION.apk\`: everything in play, plus opt-in SMS capture. It asks for permission to receive SMS and only reads messages after you turn capture on.
+
+          Both are signed with the same release key. Check downloads against \`SHA256SUMS.txt\`.
+          EOF
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "MoneyForge $TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --generate-notes \
+            moneyforge-play-"$VERSION".apk \
+            moneyforge-full-"$VERSION".apk \
+            SHA256SUMS.txt

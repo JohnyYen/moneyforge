@@ -31,7 +31,7 @@ Out of scope: the Google Play upload job (deferred by the user), F-Droid or Izzy
 ## Tasks
 
 - [x] R1 Release signing config plugin, registered in `app.config.ts`, with tests.
-- [ ] R2 Release workflow: tag `v*` builds both variants, signs, and publishes a GitHub Release; `workflow_dispatch` builds artifacts only.
+- [x] R2 Release workflow: tag `v*` builds both variants, signs, and publishes a GitHub Release; `workflow_dispatch` builds artifacts only.
 - [ ] R3 First dry run on GitHub, fix what the first native compile reveals.
 - [ ] R4 README install and release instructions.
 
@@ -76,6 +76,35 @@ Not run: no native build ran. The first compile happens in R3 on GitHub.
 
 Commit: `build(android): sign release builds from environment variables`.
 
+## R2 done
+
+Route: delegated writer, same unit as R1.
+
+What changed: `.github/workflows/release.yml` with three jobs.
+- `verify-version` reads `version` from `app.config.ts` and, on a tag, fails when the tag minus `v` differs.
+- `build` runs a `[play, full]` matrix: prebuild, decode the keystore, `./gradlew assembleRelease`, check the certificate with `apksigner verify --print-certs`, rename to `moneyforge-<variant>-<version>.apk`, upload the artifact, and delete the keystore in an `if: always()` step.
+- `release` runs only on a tag push, with `contents: write`. It writes `SHA256SUMS.txt` and runs `gh release create --verify-tag --notes-file ... --generate-notes` with both APKs and the checksums. The notes say play asks for no SMS permission and full adds opt-in SMS capture.
+
+Decisions:
+- The version comes from a regex over `app.config.ts`, not `expo config`. The check then needs no install and fails fast. A missing match fails the job.
+- JDK 17 (temurin): `node_modules/react-native/gradle/libs.versions.toml` pins AGP 9.2.1, which needs JDK 17 or newer, and the React Native Gradle plugins use `jvmToolchain(17)`.
+- No `android-actions/setup-android`: the ubuntu runner image ships the SDK with licenses accepted, and AGP downloads the platform (compileSdk 37), build tools 37.0.0, and NDK 27.1 it needs.
+- `gradle/actions/setup-gradle@v4` caches Gradle and validates the wrapper.
+- Without `ANDROID_KEYSTORE_BASE64` the build falls back to debug signing with a warning and skips the certificate check. A tag build without it fails before assembling. In this repository the secret is set, so dry runs sign too.
+- The keystore path goes to `GITHUB_ENV` only after decoding. Passwords are passed straight from secrets to the Gradle step and never echoed.
+- Concurrency group `release-<ref>`. Branch dry runs cancel older runs; tag runs never cancel.
+- No Google Play job, as agreed.
+
+Verification:
+- YAML parse with `js-yaml`: three jobs, build steps in the intended order.
+- The version regex run locally returned `0.1.0`. `v0.1.0` matched and `v0.2.0` was detected as a mismatch.
+- The notes heredoc rendered locally with backticks intact. The digest pipeline turned a lowercase `apksigner` line into the expected uppercase fingerprint.
+- `actionlint` is not installed, so it did not run.
+
+Not run: no native build ran. The first compile happens in R3 on GitHub.
+
+Commit: `ci: publish signed APKs to GitHub Releases on version tags`.
+
 ## Next step
 
-R2, then R3 on GitHub.
+R3: push the branch, run the workflow manually, and fix what the first native compile reveals.
