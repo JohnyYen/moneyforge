@@ -30,7 +30,7 @@ Message capture turns bank messages into transactions through rules you write.
 - **Only senders you trust.** A message is kept only when its sender matches a source you created. Messages from any other sender are discarded without being written or logged.
 - **One-time codes are discarded.** A message that looks like a one-time or verification code, with no money amount, is dropped.
 - **Message text is short-lived.** When a message becomes a transaction, or you reject it, its text is erased. Messages no rule could read, and the text of messages still waiting for you, are removed after a retention period. It is 30 days by default, and you can change it in the message settings.
-- **Rule samples are yours to manage.** If you build a rule from a message, the message is copied into the rule's test samples, where it stays until you edit or delete it.
+- **Rules keep only what you save.** If you build a rule from a message, its template is prefilled from that message, and the app warns you when the template would keep digits or long text from it. A rule's test samples are only what you type yourself. Whatever you save in a rule stays until you edit or delete it.
 
 ## Network requests
 
