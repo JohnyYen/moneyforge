@@ -49,6 +49,7 @@ export default function createConfig({ config }: ConfigContext): ExpoConfig {
         },
       ],
       ['./plugins/with-message-capture', { variant: variant.variantName }],
+      './plugins/with-release-signing',
     ],
     experiments: {
       typedRoutes: true,
