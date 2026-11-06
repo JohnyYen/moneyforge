@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import {
   Button,
@@ -11,41 +12,63 @@ import {
   Title,
 } from '@/shared/ui/primitives';
 
-import type { AccountBalance } from '../../application/overview-use-cases';
 import type { Currency } from '../../domain/currency';
 import { formatDisplay } from '../../domain/money';
 import type { NetWorth } from '../../domain/net-worth';
+import type { AccountsListEntry, AccountsListModel } from './accounts-list-model';
 
 export type NetWorthSummary = { readonly netWorth: NetWorth; readonly base: Currency };
 
 export function AccountsView({
   header,
-  balances,
+  list,
   summary,
   summaryExtra,
   onOpenAccount,
+  onOpenGroup,
   onAddAccount,
   onAddTransaction,
 }: {
   header?: ReactNode;
-  balances: readonly AccountBalance[];
+  list: AccountsListModel;
   summary: NetWorthSummary | null;
   summaryExtra?: ReactNode;
   onOpenAccount: (id: string) => void;
+  onOpenGroup: (id: string) => void;
   onAddAccount: () => void;
   onAddTransaction: () => void;
 }) {
-  const active = balances.filter(({ account }) => !account.archived);
-  const archived = balances.filter(({ account }) => account.archived);
-  const renderRow = ({ account, currency, balance }: AccountBalance) => (
-    <ListRow
-      key={account.id}
-      title={account.name}
-      subtitle={`${account.type} · ${currency.code}`}
-      trailing={formatDisplay(balance, currency)}
-      onPress={() => onOpenAccount(account.id)}
-    />
-  );
+  const renderEntry = (entry: AccountsListEntry) =>
+    entry.kind === 'account' ? (
+      <ListRow
+        key={entry.id}
+        title={entry.title}
+        subtitle={entry.subtitle}
+        trailing={entry.trailing}
+        onPress={() => onOpenAccount(entry.id)}
+      />
+    ) : (
+      <View key={entry.id}>
+        <ListRow
+          title={entry.title}
+          subtitle={entry.subtitle}
+          trailing={entry.trailing ?? undefined}
+          onPress={() => onOpenGroup(entry.id)}
+        />
+        {entry.note ? <Notice>{entry.note}</Notice> : null}
+        <View style={styles.subAccounts}>
+          {entry.accounts.map((account) => (
+            <ListRow
+              key={account.id}
+              title={account.title}
+              subtitle={account.subtitle}
+              trailing={account.trailing}
+              onPress={() => onOpenAccount(account.id)}
+            />
+          ))}
+        </View>
+      </View>
+    );
 
   return (
     <Screen>
@@ -63,15 +86,21 @@ export function AccountsView({
           {summaryExtra}
         </>
       ) : null}
-      {active.length > 0 ? <Button label="Add transaction" onPress={onAddTransaction} /> : null}
+      {list.hasActiveAccounts ? (
+        <Button label="Add transaction" onPress={onAddTransaction} />
+      ) : null}
       <SectionLabel>Accounts</SectionLabel>
-      {active.length === 0 ? (
+      {list.active.length === 0 ? (
         <EmptyState title="No accounts yet" hint="Add your first account to start tracking." />
       ) : null}
-      {active.map(renderRow)}
+      {list.active.map(renderEntry)}
       <Button label="Add account" variant="secondary" onPress={onAddAccount} />
-      {archived.length > 0 ? <SectionLabel>Archived</SectionLabel> : null}
-      {archived.map(renderRow)}
+      {list.archived.length > 0 ? <SectionLabel>Archived</SectionLabel> : null}
+      {list.archived.map(renderEntry)}
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  subAccounts: { paddingLeft: 24 },
+});
