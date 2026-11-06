@@ -78,3 +78,5 @@ Work-unit commits on `feat/account-groups`. The forecast is about 1000 authored 
 ## Next step
 
 Native review of the T9.3 slice, then delivery under the repo's policy.
+
+- Reviews: T9.1 `5d14113` (review-1ac1f7b57f144116), T9.2 `700a38f..72557e6` (review-6bdc5553a9ed6005) and T9.3 `651a067..34eec2d` (review-1b8bffdffb02b7be): medium, granted, approved and acknowledged. Each review's non-blocking findings were fixed in the next slice. Open T9.3 follow-ups: the group detail screen fails on `setup-required`, which `SetupGate` (`app/_layout.tsx`) keeps out of reach; the home-list fallback lives in the screen and is untested; group detail shows only one error at a time.
