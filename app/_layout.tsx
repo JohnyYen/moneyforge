@@ -19,6 +19,8 @@ export default function RootLayout() {
             <Stack.Screen name="accounts/[id]/index" options={{ title: 'Account' }} />
             <Stack.Screen name="accounts/[id]/edit" options={{ title: 'Edit account' }} />
             <Stack.Screen name="accounts/[id]/reconcile" options={{ title: 'Reconcile' }} />
+            <Stack.Screen name="account-groups/[id]/index" options={{ title: 'Account group' }} />
+            <Stack.Screen name="account-groups/[id]/edit" options={{ title: 'Edit group' }} />
             <Stack.Screen name="transactions/new" options={{ title: 'Add transaction' }} />
             <Stack.Screen name="transactions/[id]" options={{ title: 'Transaction' }} />
             <Stack.Screen name="categories" options={{ title: 'Categories' }} />
