@@ -285,7 +285,47 @@ describe('account groups', () => {
         await ledger.updateAccount({ ...edit, id: accounts[0].id, name: 'Dollars', archived: true }),
       );
       expect(renamed).toMatchObject({ name: 'Dollars', groupId: group.id });
-      unwrap(await ledger.moveAccountToGroup(accounts[1].id, null));
+      const out = unwrap(await ledger.moveAccountToGroup(accounts[1].id, null));
+      expect(out.groupId).toBeNull();
+      await expect(ledger.getAccount(accounts[1].id)).resolves.toMatchObject({ groupId: null });
+    });
+  });
+
+  describe('mirroring the group type', () => {
+    const create = async (type: string, currencyCode: string, groupId?: string | null) =>
+      ledger.createAccount({ name: 'Wallet', type, currencyCode, openingBalance: '0', groupId });
+
+    it('gives an account moved into a group the group type, and keeps it when moved out', async () => {
+      const { group } = await bankX();
+      const wallet = unwrap(await create('Crypto', 'DAI'));
+
+      const moved = unwrap(await ledger.moveAccountToGroup(wallet.id, group.id));
+
+      expect(moved.type).toBe('Bank');
+      await expect(ledger.getAccount(wallet.id)).resolves.toMatchObject({ type: 'Bank' });
+      const out = unwrap(await ledger.moveAccountToGroup(wallet.id, null));
+      expect(out).toMatchObject({ type: 'Bank', groupId: null });
+    });
+
+    it('stores the group type when creating or editing an account in a group', async () => {
+      const { group, accounts } = await bankX();
+
+      const created = unwrap(await create('Crypto', 'DAI', group.id));
+      expect(created.type).toBe('Bank');
+      await expect(ledger.getAccount(created.id)).resolves.toMatchObject({ type: 'Bank' });
+
+      const loose = unwrap(await create('Crypto', 'COP'));
+      const edit = { id: loose.id, name: 'Loose', type: 'Cash', openingBalance: '0', archived: false };
+      const joined = unwrap(await ledger.updateAccount({ ...edit, groupId: group.id }));
+      expect(joined.type).toBe('Bank');
+
+      // Left out, the group is kept, and so is its type.
+      const kept = unwrap(await ledger.updateAccount({ ...edit, id: accounts[0].id }));
+      expect(kept.type).toBe('Bank');
+
+      // Taken out of the group, the submitted type applies.
+      const left = unwrap(await ledger.updateAccount({ ...edit, id: accounts[0].id, groupId: null }));
+      expect(left).toMatchObject({ type: 'Cash', groupId: null });
     });
   });
 });

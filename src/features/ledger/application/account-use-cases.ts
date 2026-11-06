@@ -1,6 +1,7 @@
 import { err, ok, type Result } from '@/shared/result';
 
 import { validateAccountFields, type Account } from '../domain/account';
+import type { AccountGroup } from '../domain/account-group';
 import { createAdjustment } from '../domain/journal';
 import { ledgerError, type LedgerError } from '../domain/ledger-error';
 import { parseDecimal } from '../domain/money';
@@ -34,16 +35,16 @@ async function writeOpeningEntry(
 
 /**
  * Checks that an account may sit in a group: the group exists, is not archived unless the account
- * is already in it, and holds no other account in the same currency. Writes nothing, so a refusal
- * leaves the transaction untouched.
+ * is already in it, and holds no other account in the same currency. Returns the group, or `null`
+ * for no group. Writes nothing, so a refusal leaves the transaction untouched.
  */
 export async function checkGroupSlot(
   { accounts, accountGroups }: LedgerRepositories,
   groupId: string | null,
   currencyCode: string,
   current?: { readonly id: string; readonly groupId: string | null },
-): Promise<Result<void, LedgerError>> {
-  if (groupId === null) return ok(undefined);
+): Promise<Result<AccountGroup | null, LedgerError>> {
+  if (groupId === null) return ok(null);
   const group = await accountGroups.get(groupId);
   if (!group) return err(ledgerError('group-not-found', 'Account group not found.'));
   if (group.archived && current?.groupId !== groupId) {
@@ -58,7 +59,7 @@ export async function checkGroupSlot(
       ledgerError('group-currency-taken', `This group already has a ${currencyCode} account.`),
     );
   }
-  return ok(undefined);
+  return ok(group);
 }
 
 export type NewAccountInput = {
@@ -89,6 +90,8 @@ export async function prepareAccount(
 
   return ok({
     ...fields.value,
+    // A sub-account mirrors its group's type.
+    type: slot.value?.type ?? fields.value.type,
     id,
     currencyCode: currency.code,
     openingBalance: openingBalance.value,
@@ -155,6 +158,7 @@ export function createAccountUseCases({ store, clock, generateId }: LedgerDeps) 
         const account: Account = {
           ...existing,
           ...fields.value,
+          type: slot.value?.type ?? fields.value.type,
           openingBalance: openingBalance.value,
           archived: input.archived,
           groupId,

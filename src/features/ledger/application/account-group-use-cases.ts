@@ -111,7 +111,8 @@ export function createAccountGroupUseCases({ store, clock, generateId }: LedgerD
         }
         const slot = await checkGroupSlot(repositories, groupId, existing.currencyCode, existing);
         if (!slot.ok) return slot;
-        const account = { ...existing, groupId };
+        // Moving into a group takes its type; moving out keeps the current one.
+        const account = { ...existing, groupId, type: slot.value?.type ?? existing.type };
         await repositories.accounts.save(account);
         return ok(account);
       }),
