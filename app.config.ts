@@ -21,7 +21,8 @@ export default function createConfig({ config }: ConfigContext): ExpoConfig {
     name: variant.name,
     slug: 'moneyforge',
     version: '0.1.0',
-    platforms: ['android'],
+    // Web is a development preview only (`pnpm web`); Android is the product target.
+    platforms: ['android', 'web'],
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: 'moneyforge',

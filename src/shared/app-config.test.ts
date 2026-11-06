@@ -43,7 +43,7 @@ describe('app config', () => {
     expect(createConfig(context).android?.allowBackup).toBe(false);
   });
 
-  it('targets Android only', () => {
-    expect(createConfig(context).platforms).toEqual(['android']);
+  it('ships Android, with web only as a dev preview', () => {
+    expect(createConfig(context).platforms).toEqual(['android', 'web']);
   });
 });

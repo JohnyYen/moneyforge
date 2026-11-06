@@ -71,6 +71,7 @@ Review base for the next candidate: `a3af194`.
 - [x] T8c.2 Docs: README and privacy policy. Commit: the `docs: add privacy policy and README overview` commit that records this line.
 - [x] T8c.3 CI: typecheck, lint, test, Android export. Commit: the `ci: add typecheck, lint, test and Android export workflow` commit that records this line.
 - [x] T8c.4 Store listing copy. Commit: the `docs: add store listing copy` commit that records this line.
+- [x] T8d Web dev preview: browser preview of screens only; Android remains the only product target. Commit: the `feat(web): add browser dev preview with expo-sqlite` commit that records this line.
 
 ## Acceptance criteria
 
@@ -621,6 +622,20 @@ T8c.4 evidence:
 - Claims were checked against the README, the privacy policy, `app.config.ts`, and `plugins/with-message-capture.js`.
 - Found: the privacy policy says building a rule from a message copies it into the rule's samples, but `src/features/rules/ui/rules-model.ts` keeps samples to what the user types, and the README agrees. The listing follows the code. The policy line is still to be corrected.
 - Not verified: Google's current Data safety definitions for user-directed on-chain reads (no network), and the merged release manifest permissions.
+
+T8d done. Route: delegated direct, one bounded writer. The first pass stopped before committing: `src/shared/app-config.test.ts` asserted an Android-only platform list and sat outside the allowed surface. The user approved editing it and keeping the `writeHead` patch. Test-first does not apply beyond that test: the change is dev-server configuration with no runnable RED, so the export and dev-server runs below are the proof.
+
+T8d evidence:
+
+- What changed: `metro.config.js` is new: it adds `wasm` to `resolver.assetExts` (expo-sqlite web imports `wa-sqlite.wasm`) and sets cross-origin isolation headers on the dev server. `app.config.ts` lists `platforms: ['android', 'web']`; no `web` keys were needed (the default single output bundles). `package.json` gains `"web": "expo start --web"`. The app-config test now expects `['android', 'web']`.
+- Header choice: `Cross-Origin-Embedder-Policy: credentialless` and `Cross-Origin-Opener-Policy: same-origin`, as recommended by expo-sqlite's bundled web docs. `credentialless` was chosen over `require-corp` because it does not block cross-origin fetches and images that lack a CORP header.
+- Why `writeHead` is patched: Expo CLI serves the web `index.html` from its ManifestMiddleware, which it prepends ahead of Metro's middleware, so a wrapper returned from `server.enhanceMiddleware` set the headers on the bundle but never on the page. The config patches `http.ServerResponse.prototype.writeHead` once, inside `enhanceMiddleware`, which only runs under `expo start` and never for `expo export`.
+- No web boot blockers needed guards: message capture is loaded with `requireOptionalNativeModule`, so it is null on web and falls back to `absentMessageCapture`; `PermissionsAndroid` is only referenced inside functions that run when native capture exists. expo-sqlite web uses SharedArrayBuffer only for its sync APIs, and the driver uses only async ones.
+- `EXPO_OFFLINE=1 pnpm expo export --platform web`: exported; the wasm asset was emitted as `assets/node_modules/expo-sqlite/web/wa-sqlite/wa-sqlite.<hash>.wasm` (641 KB). `dist/` was deleted.
+- `EXPO_OFFLINE=1 pnpm expo export --platform android`: exported. `dist/` was deleted.
+- `CI=1 pnpm expo start --web --port 8099`: `curl -sI /` returned 200 with both `Cross-Origin-Embedder-Policy: credentialless` and `Cross-Origin-Opener-Policy: same-origin`; the entry bundle from the HTML returned 200 (5.7 MB); the wasm asset URL returned 200 (641 KB). The server was stopped.
+- Limits: the preview works only under `expo start --web`, because a static export is served without the COOP and COEP headers. The WAL pragma is expected to fall back to the default journal mode on web (not observed). COEP may block some cross-origin resources. The `writeHead` patch depends on Expo CLI internals and may need revisiting on an SDK upgrade.
+- Not verified: rendering in a real browser, `crossOriginIsolated` in the page, and database reads and writes through the wasm worker.
 
 ## Next step
 
