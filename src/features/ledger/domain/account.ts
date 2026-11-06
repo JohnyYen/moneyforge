@@ -13,6 +13,8 @@ export type Account = {
   readonly openingBalance: bigint;
   readonly archived: boolean;
   readonly systemRole: SystemRole | null;
+  /** The group the account belongs to. A system account never has one. */
+  readonly groupId: string | null;
 };
 
 export type AccountRef = Pick<Account, 'id' | 'currencyCode'>;
@@ -36,6 +38,7 @@ export function buildSystemAccounts(currencyCode: string): Account[] {
     openingBalance: 0n,
     archived: false,
     systemRole: role,
+    groupId: null,
   }));
 }
 

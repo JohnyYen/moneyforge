@@ -232,6 +232,7 @@ describe('projectionNotices', () => {
     openingBalance: 0n,
     archived: false,
     systemRole: null,
+    groupId: null,
   };
   const item: RecurringItem = {
     id: 'r1',

@@ -34,6 +34,7 @@ const account = (id: string, currencyCode = 'USD'): Account => ({
   openingBalance: 0n,
   archived: false,
   systemRole: null,
+  groupId: null,
 });
 
 const lookups = { accounts: [account('a'), account('b'), account('e', 'EUR')], currencies: [usd, eur] };

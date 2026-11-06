@@ -1,3 +1,4 @@
+import { createAccountGroupUseCases } from './account-group-use-cases';
 import { createAccountUseCases } from './account-use-cases';
 import { createCategoryUseCases } from './category-use-cases';
 import { createCurrencyUseCases } from './currency-use-cases';
@@ -11,6 +12,7 @@ export function createLedgerService(deps: LedgerDeps) {
     ...createSetupUseCases(deps),
     ...createCurrencyUseCases(deps),
     ...createAccountUseCases(deps),
+    ...createAccountGroupUseCases(deps),
     ...createCategoryUseCases(deps),
     ...createTransactionUseCases(deps),
     ...createOverviewUseCases(deps),

@@ -8,6 +8,7 @@ export type LedgerErrorCode =
   | 'invalid-currency'
   | 'invalid-account'
   | 'invalid-category'
+  | 'invalid-group'
   | 'non-positive-amount'
   | 'zero-posting'
   | 'too-few-postings'
@@ -21,7 +22,11 @@ export type LedgerErrorCode =
   | 'not-found'
   | 'already-exists'
   | 'currency-in-use'
-  | 'setup-required';
+  | 'setup-required'
+  | 'group-not-found'
+  | 'group-empty'
+  | 'duplicate-currency'
+  | 'group-currency-taken';
 
 export type LedgerError = { readonly code: LedgerErrorCode; readonly message: string };
 

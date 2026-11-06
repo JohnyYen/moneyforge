@@ -38,6 +38,7 @@ const view: WatchedView = {
     openingBalance: 0n,
     archived: false,
     systemRole: null,
+    groupId: null,
   },
   currency: { code: 'USDT', name: 'Tether', decimals: 2, symbol: '$', kind: 'stablecoin' },
   stale: false,

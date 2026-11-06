@@ -5,6 +5,8 @@ type ColumnDefinition = {
   readonly name: string;
   readonly type: 'INTEGER' | 'TEXT';
   readonly required: boolean;
+  /** Set when a later migration added the column; otherwise it came with its table. */
+  readonly since?: number;
 };
 
 type TableDefinition = {
@@ -20,6 +22,17 @@ type TableDefinition = {
  * table it predates is refused.
  */
 const TABLES: readonly TableDefinition[] = [
+  // Ahead of accounts, which point at it.
+  {
+    name: 'account_groups',
+    since: 8,
+    columns: [
+      { name: 'id', type: 'TEXT', required: false },
+      { name: 'name', type: 'TEXT', required: true },
+      { name: 'type', type: 'TEXT', required: true },
+      { name: 'archived', type: 'INTEGER', required: true },
+    ],
+  },
   {
     name: 'accounts',
     since: 1,
@@ -31,6 +44,7 @@ const TABLES: readonly TableDefinition[] = [
       { name: 'opening_balance', type: 'TEXT', required: true },
       { name: 'archived', type: 'INTEGER', required: true },
       { name: 'system_role', type: 'TEXT', required: false },
+      { name: 'group_id', type: 'TEXT', required: false, since: 8 },
     ],
   },
   {
@@ -450,6 +464,8 @@ export const BACKUP_TABLES: readonly { readonly name: string }[] = TABLES.map(({
 export function schemaAt(version: number): readonly TableSchema[] {
   return TABLES.filter((table) => table.since <= version).map((table) => ({
     name: table.name,
-    columns: table.columns,
+    columns: table.columns
+      .filter((column) => (column.since ?? table.since) <= version)
+      .map(({ name, type, required }) => ({ name, type, required })),
   }));
 }

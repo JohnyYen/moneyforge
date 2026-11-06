@@ -14,6 +14,7 @@ const account = (id: string, name: string, currencyCode: string): Account => ({
   openingBalance: 0n,
   archived: false,
   systemRole: null,
+  groupId: null,
 });
 const food: Category = { id: 'food', name: 'Food', kind: 'expense', parentId: null, archived: false };
 const lookups = {

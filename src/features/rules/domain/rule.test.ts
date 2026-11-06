@@ -19,6 +19,7 @@ const account = (id: string, currencyCode: string): Account => ({
   openingBalance: 0n,
   archived: false,
   systemRole: null,
+  groupId: null,
 });
 
 const lookups = {

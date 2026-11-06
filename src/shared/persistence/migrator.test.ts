@@ -125,7 +125,12 @@ describe('upgrading a version 1 database', () => {
 
     await runMigrations(driver, migrations);
 
-    await expect(snapshot()).resolves.toEqual(before);
+    // Every account starts outside a group, and nothing else changes.
+    await expect(snapshot()).resolves.toEqual({
+      ...before,
+      accounts: before.accounts.map((row) => ({ ...(row as object), group_id: null })),
+    });
+    await expect(driver.all('SELECT * FROM account_groups')).resolves.toEqual([]);
     await expect(driver.all('SELECT version FROM schema_migrations ORDER BY version')).resolves.toEqual(
       [
         { version: 1 },
@@ -135,9 +140,33 @@ describe('upgrading a version 1 database', () => {
         { version: 5 },
         { version: 6 },
         { version: 7 },
+        { version: 8 },
       ],
     );
     await expect(driver.all('PRAGMA foreign_key_check')).resolves.toEqual([]);
+  });
+
+  it('holds one account per currency in a group and leaves ungrouped accounts free', async () => {
+    await runMigrations(driver, migrations);
+
+    await driver.exec(`
+      INSERT INTO account_groups (id, name, type) VALUES ('bank', 'Bank', 'Bank');
+      UPDATE accounts SET group_id = 'bank' WHERE id = 'checking';
+      INSERT INTO accounts (id, name, type, currency_code) VALUES ('loose', 'Loose', 'Bank', 'USD');
+    `);
+
+    await expect(
+      driver.exec(`
+        INSERT INTO accounts (id, name, type, currency_code, group_id)
+        VALUES ('second', 'Second', 'Bank', 'USD', 'bank')
+      `),
+    ).rejects.toThrow(/unique/i);
+    await expect(
+      driver.exec(`
+        INSERT INTO accounts (id, name, type, currency_code, group_id)
+        VALUES ('stray', 'Stray', 'Bank', 'DAI', 'missing')
+      `),
+    ).rejects.toThrow(/foreign key/i);
   });
 
   it('keeps an 18 decimal amount as exact text', async () => {

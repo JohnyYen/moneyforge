@@ -9,6 +9,7 @@ import type {
   TransactionFilter,
 } from '../application/ports';
 import type { Account, SystemRole } from '../domain/account';
+import type { AccountGroup } from '../domain/account-group';
 import type { Category, CategoryKind } from '../domain/category';
 import type { Currency } from '../domain/currency';
 import { isBalanced, type Transaction, type TransactionKind } from '../domain/journal';
@@ -21,6 +22,14 @@ type AccountRow = {
   opening_balance: string;
   archived: number;
   system_role: SystemRole | null;
+  group_id: string | null;
+};
+
+type AccountGroupRow = {
+  id: string;
+  name: string;
+  type: string;
+  archived: number;
 };
 
 type CategoryRow = {
@@ -63,6 +72,14 @@ const toAccount = (row: AccountRow): Account => ({
   openingBalance: BigInt(row.opening_balance),
   archived: row.archived === 1,
   systemRole: row.system_role,
+  groupId: row.group_id,
+});
+
+const toAccountGroup = (row: AccountGroupRow): AccountGroup => ({
+  id: row.id,
+  name: row.name,
+  type: row.type,
+  archived: row.archived === 1,
 });
 
 const toCategory = (row: CategoryRow): Category => ({
@@ -182,11 +199,12 @@ export function createLedgerRepositories(
       save: (account) =>
         sql.run(
           `INSERT INTO accounts
-             (id, name, type, currency_code, opening_balance, archived, system_role)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+             (id, name, type, currency_code, opening_balance, archived, system_role, group_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (id) DO UPDATE SET
              name = excluded.name, type = excluded.type,
-             opening_balance = excluded.opening_balance, archived = excluded.archived`,
+             opening_balance = excluded.opening_balance, archived = excluded.archived,
+             group_id = excluded.group_id`,
           [
             account.id,
             account.name,
@@ -195,7 +213,28 @@ export function createLedgerRepositories(
             account.openingBalance.toString(),
             account.archived ? 1 : 0,
             account.systemRole,
+            account.groupId,
           ],
+        ),
+    },
+
+    accountGroups: {
+      list: async () =>
+        (
+          await sql.all<AccountGroupRow>('SELECT * FROM account_groups ORDER BY name, id')
+        ).map(toAccountGroup),
+      get: async (id) => {
+        const row = await sql.get<AccountGroupRow>('SELECT * FROM account_groups WHERE id = ?', [
+          id,
+        ]);
+        return row ? toAccountGroup(row) : null;
+      },
+      save: (group) =>
+        sql.run(
+          `INSERT INTO account_groups (id, name, type, archived) VALUES (?, ?, ?, ?)
+           ON CONFLICT (id) DO UPDATE SET
+             name = excluded.name, type = excluded.type, archived = excluded.archived`,
+          [group.id, group.name, group.type, group.archived ? 1 : 0],
         ),
     },
 

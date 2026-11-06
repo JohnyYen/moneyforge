@@ -21,6 +21,7 @@ const account = (id: string, currencyCode: string): Account => ({
   openingBalance: 0n,
   archived: false,
   systemRole: null,
+  groupId: null,
 });
 const lookups: SplitLookups = {
   accounts: [account('a', 'USD'), account('b', 'USD'), account('c', 'EUR')],

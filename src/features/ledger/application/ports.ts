@@ -1,6 +1,7 @@
 import type { Result } from '@/shared/result';
 
 import type { Account } from '../domain/account';
+import type { AccountGroup } from '../domain/account-group';
 import type { Category } from '../domain/category';
 import type { Currency } from '../domain/currency';
 import type { ExchangeRate } from '../domain/exchange-rate';
@@ -27,6 +28,12 @@ export interface AccountRepository {
   listUser(): Promise<Account[]>;
   get(id: string): Promise<Account | null>;
   save(account: Account): Promise<void>;
+}
+
+export interface AccountGroupRepository {
+  list(): Promise<AccountGroup[]>;
+  get(id: string): Promise<AccountGroup | null>;
+  save(group: AccountGroup): Promise<void>;
 }
 
 export interface CategoryRepository {
@@ -91,6 +98,7 @@ export interface CurrencyUsageGuard {
 export interface LedgerRepositories {
   readonly currencies: CurrencyRepository;
   readonly accounts: AccountRepository;
+  readonly accountGroups: AccountGroupRepository;
   readonly categories: CategoryRepository;
   readonly journal: JournalRepository;
   readonly exchangeRates: ExchangeRateRepository;

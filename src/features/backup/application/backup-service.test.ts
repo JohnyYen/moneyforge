@@ -21,6 +21,7 @@ import type { BackupCipher, BackupTransport } from './ports';
 import { RESTORE_CONFIRMATION, type PreparedRestore } from './backup-service';
 
 const PASSPHRASE = 'a long enough passphrase';
+const LATEST = migrations[migrations.length - 1].version;
 const HUGE_AMOUNT = '123456789012345678.123456789012345678';
 const DESCRIPTION = 'Unmistakable lunch description';
 const SECRET_BODY = 'Raw message body with card 4242';
@@ -185,7 +186,7 @@ const exportFrom = async ({ services, sent }: Device) => {
   return sent[sent.length - 1];
 };
 
-const snapshotOf = async (text: string, passphrase = PASSPHRASE, current = 7) =>
+const snapshotOf = async (text: string, passphrase = PASSPHRASE, current = LATEST) =>
   unwrap(await openContainer(unwrap(parseContainer(text, current)), passphrase, fastCipher));
 
 const reseal = (snapshot: BackupSnapshot) => sealSnapshot(snapshot, PASSPHRASE, fastCipher);
@@ -270,7 +271,7 @@ describe('export', () => {
     const source = await device();
     await seed(source);
     const headers = [await exportFrom(source), await exportFrom(source)].map((text) =>
-      unwrap(parseContainer(text, 7)).header,
+      unwrap(parseContainer(text, LATEST)).header,
     );
     expect(headers[0].salt).not.toEqual(headers[1].salt);
     expect(headers[0].nonce).not.toEqual(headers[1].nonce);
@@ -388,7 +389,7 @@ describe('restore', () => {
     );
     expect(prepared.summary).toMatchObject({
       createdAt: '2026-03-10T12:00:00.000Z',
-      schemaVersion: 7,
+      schemaVersion: LATEST,
       upgrades: false,
       accounts: expect.any(Number),
       transactions: expect.any(Number),
@@ -499,7 +500,7 @@ describe('restore', () => {
 
     it('refuses a newer schema before asking the KDF for anything', async () => {
       const snapshot = await snapshotOf(text);
-      const newer = await reseal({ ...snapshot, schemaVersion: 8 });
+      const newer = await reseal({ ...snapshot, schemaVersion: LATEST + 1 });
       const spy = jest.spyOn(fastCipher, 'deriveKey');
       try {
         const result = await restore(target, newer);
@@ -586,13 +587,13 @@ describe('restore', () => {
 
     it('rolls back when a later migration fails', async () => {
       const failing = await device({
-        schema: [...migrations, { version: 8, name: 'broken', sql: 'CREATE TABLE settings (a)' }].slice(0, 7),
+        schema: migrations,
       });
       await failing.services.ledger.initialize();
       const start = await dump(failing.driver);
       const store = createSqliteBackupStore(failing.driver, [
         ...migrations,
-        { version: 8, name: 'broken', sql: 'CREATE TABLE settings (a)' },
+        { version: LATEST + 1, name: 'broken', sql: 'CREATE TABLE settings (a)' },
       ]);
       await expect(store.replaceAll(await snapshotOf(text))).rejects.toThrow();
       expect(await dump(failing.driver)).toEqual(start);
@@ -600,17 +601,34 @@ describe('restore', () => {
   });
 
   describe('older schemas', () => {
-    const older = migrations.filter(({ version }) => version <= 6);
+    /**
+     * Undoes later migrations by hand, so a database the current code filled stands as an older
+     * app left it. The current store writes columns an older schema lacks, so it cannot fill one.
+     */
+    const ROLLBACKS: Record<number, string> = {
+      8: `DROP INDEX accounts_group_currency;
+          ALTER TABLE accounts DROP COLUMN group_id;
+          DROP TABLE account_groups;`,
+      7: 'DROP TABLE imported_rows;',
+    };
+
+    const rollBack = async ({ driver }: Device, version: number) => {
+      for (let at = LATEST; at > version; at--) {
+        await driver.exec(ROLLBACKS[at]);
+        await driver.run('DELETE FROM schema_migrations WHERE version = ?', [at]);
+      }
+    };
 
     it('restores a version 6 backup through the migrator', async () => {
-      const source = await device({ schema: older });
+      const source = await device();
       await source.services.ledger.initialize();
       unwrap(await source.services.ledger.setBaseCurrency('USD'));
       await source.driver.run(`UPDATE onchain_chains SET name = 'Renamed chain'`);
+      await rollBack(source, 6);
       const expected = await source.driver.all('SELECT * FROM currencies ORDER BY code');
 
       const text = await exportFrom(source);
-      expect(unwrap(parseContainer(text, 7)).header.schemaVersion).toBe(6);
+      expect(unwrap(parseContainer(text, LATEST)).header.schemaVersion).toBe(6);
       const snapshot = await snapshotOf(text);
       expect(snapshot.tables.map(({ name }) => name)).not.toContain('imported_rows');
 
@@ -625,10 +643,55 @@ describe('restore', () => {
       const applied = await target.driver.all<{ version: number }>(
         'SELECT version FROM schema_migrations ORDER BY version',
       );
-      expect(applied.map(({ version }) => version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+      expect(applied.map(({ version }) => version)).toEqual(migrations.map(({ version }) => version));
       expect(await target.driver.all('SELECT * FROM imported_rows')).toEqual([]);
       const chains = await target.driver.all<{ name: string }>('SELECT name FROM onchain_chains');
       expect(new Set(chains.map(({ name }) => name))).toEqual(new Set(['Renamed chain']));
+    });
+
+    it('restores a version 7 backup with every account outside a group', async () => {
+      const source = await device();
+      await seed(source);
+      await rollBack(source, 7);
+      const expected = await source.driver.all('SELECT * FROM accounts ORDER BY id');
+      const text = await exportFrom(source);
+      const snapshot = await snapshotOf(text);
+      expect(snapshot.schemaVersion).toBe(7);
+      expect(snapshot.tables.map(({ name }) => name)).not.toContain('account_groups');
+      const accounts = snapshot.tables.find(({ name }) => name === 'accounts');
+      expect(accounts?.columns).not.toContain('group_id');
+
+      const target = await device();
+      unwrap(await restore(target, text));
+
+      expect(await target.driver.all('SELECT * FROM accounts ORDER BY id')).toEqual(
+        expected.map((row) => ({ ...(row as object), group_id: null })),
+      );
+      expect(await target.driver.all('SELECT * FROM account_groups')).toEqual([]);
+    });
+
+    it('carries account groups and the group of each account', async () => {
+      const source = await device();
+      await source.services.ledger.initialize();
+      unwrap(await source.services.ledger.setBaseCurrency('USD'));
+      const { group } = unwrap(
+        await source.services.ledger.createAccountGroup({
+          name: 'Bank X',
+          type: 'Bank',
+          currencies: [
+            { currencyCode: 'USD', openingBalance: '10' },
+            { currencyCode: 'EUR', openingBalance: '5' },
+          ],
+        }),
+      );
+      const text = await exportFrom(source);
+
+      const target = await device();
+      unwrap(await restore(target, text));
+
+      await expect(target.services.ledger.listAccountGroups()).resolves.toEqual([group]);
+      const accounts = await target.services.ledger.listAccounts();
+      expect(accounts.map(({ groupId }) => groupId)).toEqual([group.id, group.id]);
     });
 
     it('runs later migrations over the restored rows', async () => {
@@ -638,7 +701,7 @@ describe('restore', () => {
       const nextSchema: Migration[] = [
         ...migrations,
         {
-          version: 8,
+          version: LATEST + 1,
           name: 'later',
           sql: `ALTER TABLE accounts ADD COLUMN shout TEXT;
                 UPDATE accounts SET shout = upper(name);`,
@@ -653,8 +716,9 @@ describe('restore', () => {
     });
 
     it('checks an older file against the older schema, and rolls back', async () => {
-      const source = await device({ schema: older });
+      const source = await device();
       await source.services.ledger.initialize();
+      await rollBack(source, 6);
       const snapshot = await snapshotOf(await exportFrom(source));
       const target = await device();
       await target.services.ledger.initialize();

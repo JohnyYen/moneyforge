@@ -24,6 +24,7 @@ const account = (id: string, currencyCode: string): Account => ({
   openingBalance: 0n,
   archived: false,
   systemRole: null,
+  groupId: null,
 });
 
 function unwrap<T>(result: { ok: true; value: T } | { ok: false; error: { message: string } }) {
@@ -70,6 +71,39 @@ describe('SQLite ledger store', () => {
     const listed = await store.accounts.listUser();
 
     expect(listed.map((item) => item.id)).toEqual(['main', 'savings', 'wallet']);
+  });
+
+  it('round trips account groups and an account moving in and out of one', async () => {
+    const group = { id: 'bank-x', name: 'Bank X', type: 'Bank', archived: false };
+    await store.accountGroups.save(group);
+    await store.accountGroups.save({ id: 'cash', name: 'Cash', type: 'Cash', archived: true });
+
+    await expect(store.accountGroups.get('bank-x')).resolves.toEqual(group);
+    await expect(store.accountGroups.get('missing')).resolves.toBeNull();
+
+    await store.accountGroups.save({ ...group, name: 'Bank Y', archived: true });
+    await expect(store.accountGroups.list()).resolves.toEqual([
+      { ...group, name: 'Bank Y', archived: true },
+      { id: 'cash', name: 'Cash', type: 'Cash', archived: true },
+    ]);
+
+    await store.accounts.save({ ...account('main', 'USD'), groupId: 'bank-x' });
+    await expect(store.accounts.get('main')).resolves.toMatchObject({ groupId: 'bank-x' });
+    await store.accounts.save(account('main', 'USD'));
+    await expect(store.accounts.get('main')).resolves.toMatchObject({ groupId: null });
+  });
+
+  it('allows one account per currency in a group', async () => {
+    await store.accountGroups.save({ id: 'bank-x', name: 'Bank X', type: 'Bank', archived: false });
+    await store.accounts.save({ ...account('main', 'USD'), groupId: 'bank-x' });
+    await store.accounts.save({ ...account('wallet', 'DAI'), groupId: 'bank-x' });
+
+    await expect(
+      store.accounts.save({ ...account('savings', 'USD'), groupId: 'bank-x' }),
+    ).rejects.toThrow(/unique/i);
+    await expect(
+      store.accounts.save({ ...account('other', 'USD'), groupId: 'missing' }),
+    ).rejects.toThrow(/foreign key/i);
   });
 
   it('stores amounts as TEXT and round trips 18 decimals exactly', async () => {
