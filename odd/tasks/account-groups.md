@@ -60,7 +60,7 @@ Work-unit commits on `feat/account-groups`. The forecast is about 1000 authored 
 ## Tasks
 
 - [x] T9.1 Persistence and use cases: migration 008, `AccountGroup` entity, store methods, use cases (create, rename, archive, add a sub-account, move an account in or out), currency uniqueness per group, backup tables. Route: delegated (writer, 2+ non-trivial files).
-- [ ] T9.2 Group balances: a domain function for the per-group total in the base currency, with missing rates; exposed by the overview use case. Route: delegated.
+- [x] T9.2 Group balances: a domain function for the per-group total in the base currency, with missing rates; exposed by the overview use case. Route: delegated.
 - [ ] T9.3 UI: grouped accounts list, create-group screen, group detail, add a sub-account, group picker in the account form. Route: delegated.
 
 ## Progress
@@ -71,6 +71,8 @@ Work-unit commits on `feat/account-groups`. The forecast is about 1000 authored 
 
 - 2026-11-06: T9.1 review follow-ups (delegated writer). A new `group-archived` error refuses an archived group as the target of `addSubAccount`, `moveAccountToGroup`, `createAccount` and `updateAccount`; an account already in the archived group can still be edited or taken out. `updateAccountGroup` carries a new type to every sub-account. Unarchiving a group keeps the cascade and also unarchives a sub-account archived on its own first, now pinned by a test and a comment. A restore over a target that already holds groups with accounts matches the snapshot without any change to the clear order, because the restore drops every table with foreign keys off. RED: 3 failing tests (type cascade, archived add, archived move/create/edit); the unarchive and backup tests passed on first run, pinning existing behavior. GREEN: `pnpm test` 78 suites, 1833 tests; `pnpm typecheck` and `pnpm lint` pass.
 
+- 2026-11-06: T9.2 done (delegated writer). `computeGroupBalance` (`domain/group-balance.ts`) totals a group's sub-accounts in the base currency through `toBaseMinor`, now extracted from `computeNetWorth` so both share one conversion (direct or inverse `findRate`, same rounding); archived sub-accounts are listed but left out of the total, and a currency with no rate goes to `missingRates`, never counted as zero. `accountsOverview()` on the ledger service returns `{ baseCurrency, groups: [{ group, accounts: AccountBalance[], total, baseCurrency, missingRates }], ungrouped: AccountBalance[] }`, archived groups and accounts included, or `setup-required` without a base currency. Net worth is unchanged. RED: the domain suite failed to resolve `./group-balance` and 4 of 5 use-case tests failed (the net worth guard passed); GREEN: `pnpm test` 80 suites, 1844 tests; `pnpm typecheck`, `pnpm lint` and the Android export pass.
+
 ## Next step
 
-T9.2.
+T9.3.

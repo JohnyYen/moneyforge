@@ -1,8 +1,10 @@
 import { err, ok, type Result } from '@/shared/result';
 
 import type { Account } from '../domain/account';
+import type { AccountGroup } from '../domain/account-group';
 import type { Currency } from '../domain/currency';
 import { isValidDate, type ExchangeRate } from '../domain/exchange-rate';
+import { computeGroupBalance, type GroupBalance } from '../domain/group-balance';
 import { ledgerError, type LedgerError } from '../domain/ledger-error';
 import { computeNetWorth, type NetWorth } from '../domain/net-worth';
 import { parseRate } from '../domain/rate';
@@ -14,6 +16,18 @@ export type AccountBalance = {
   readonly account: Account;
   readonly currency: Currency;
   readonly balance: bigint;
+};
+
+/** A group with its sub-accounts, each in its own currency, and their total in the base one. */
+export type GroupOverview = Omit<GroupBalance, 'balances'> & {
+  readonly group: AccountGroup;
+  readonly accounts: readonly AccountBalance[];
+};
+
+export type AccountsOverview = {
+  readonly baseCurrency: string;
+  readonly groups: readonly GroupOverview[];
+  readonly ungrouped: readonly AccountBalance[];
 };
 
 /** The calendar day of a moment on the device, as `YYYY-MM-DD`. */
@@ -37,8 +51,52 @@ export function createOverviewUseCases({ store, clock, generateId }: LedgerDeps)
     });
   }
 
+  async function baseCurrency(): Promise<Currency | null> {
+    const code = await store.settings.get(BASE_CURRENCY_KEY);
+    return code ? store.currencies.get(code) : null;
+  }
+
+  const setupRequired = () => err(ledgerError('setup-required', 'Choose a base currency first.'));
+
   return {
     accountBalances,
+
+    /**
+     * Every group, archived ones included, with its sub-accounts and their total in the base
+     * currency, and the accounts outside any group. Archived accounts are listed; they are left
+     * out of a group's total, as they are of net worth.
+     */
+    async accountsOverview(): Promise<Result<AccountsOverview, LedgerError>> {
+      const base = await baseCurrency();
+      if (!base) return setupRequired();
+      const [balances, groups, currencies, rates] = await Promise.all([
+        accountBalances(),
+        store.accountGroups.list(),
+        store.currencies.list(),
+        store.exchangeRates.list(),
+      ]);
+      const asOf = toLocalDay(clock.now());
+      return ok({
+        baseCurrency: base.code,
+        groups: groups.map((group) => {
+          const accounts = balances.filter(({ account }) => account.groupId === group.id);
+          const { balances: _, ...summary } = computeGroupBalance({
+            base,
+            currencies,
+            rates,
+            asOf,
+            accounts: accounts.map(({ account, balance }) => ({
+              accountId: account.id,
+              currencyCode: account.currencyCode,
+              balance,
+              archived: account.archived,
+            })),
+          });
+          return { ...summary, group, accounts };
+        }),
+        ungrouped: balances.filter(({ account }) => account.groupId === null),
+      });
+    },
 
     listTransactions: (filter: TransactionFilter) => store.journal.list(filter),
 
@@ -70,9 +128,8 @@ export function createOverviewUseCases({ store, clock, generateId }: LedgerDeps)
 
     /** Archived accounts are left out. Currencies with no rate are reported, not valued at zero. */
     async netWorth(): Promise<Result<NetWorth, LedgerError>> {
-      const baseCode = await store.settings.get(BASE_CURRENCY_KEY);
-      const base = baseCode ? await store.currencies.get(baseCode) : null;
-      if (!base) return err(ledgerError('setup-required', 'Choose a base currency first.'));
+      const base = await baseCurrency();
+      if (!base) return setupRequired();
       const [balances, currencies, rates] = await Promise.all([
         accountBalances(),
         store.currencies.list(),
