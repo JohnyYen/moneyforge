@@ -70,13 +70,19 @@ export function createAccountGroupUseCases({ store, clock, generateId }: LedgerD
       id: string,
       input: { name: string; type: string },
     ): Promise<Result<AccountGroup, LedgerError>> =>
-      store.atomic(async ({ accountGroups }) => {
+      store.atomic(async ({ accountGroups, accounts }) => {
         const fields = validateGroupFields(input);
         if (!fields.ok) return fields;
         const existing = await accountGroups.get(id);
         if (!existing) return groupNotFound();
         const group = { ...existing, ...fields.value };
         await accountGroups.save(group);
+        // Sub-accounts mirror their group's type.
+        for (const account of await accounts.listUser()) {
+          if (account.groupId === id && account.type !== group.type) {
+            await accounts.save({ ...account, type: group.type });
+          }
+        }
         return ok(group);
       }),
 
@@ -103,14 +109,17 @@ export function createAccountGroupUseCases({ store, clock, generateId }: LedgerD
         if (!existing || existing.systemRole !== null) {
           return err(ledgerError('not-found', 'Account not found.'));
         }
-        const slot = await checkGroupSlot(repositories, groupId, existing.currencyCode, existing.id);
+        const slot = await checkGroupSlot(repositories, groupId, existing.currencyCode, existing);
         if (!slot.ok) return slot;
         const account = { ...existing, groupId };
         await repositories.accounts.save(account);
         return ok(account);
       }),
 
-    /** Archiving a group archives every account in it, and unarchiving restores them all. */
+    /**
+     * Archiving a group archives every account in it, and unarchiving restores them all, including
+     * any archived on its own before the group was.
+     */
     setAccountGroupArchived: (
       id: string,
       archived: boolean,

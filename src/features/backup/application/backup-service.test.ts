@@ -694,6 +694,31 @@ describe('restore', () => {
       expect(accounts.map(({ groupId }) => groupId)).toEqual([group.id, group.id]);
     });
 
+    it('replaces groups the target already holds, with accounts pointing at them', async () => {
+      const bank = (ledger: Device['services']['ledger'], name: string, codes: string[]) =>
+        ledger.createAccountGroup({
+          name,
+          type: 'Bank',
+          currencies: codes.map((currencyCode) => ({ currencyCode, openingBalance: '7' })),
+        });
+      const source = await device();
+      await source.services.ledger.initialize();
+      unwrap(await source.services.ledger.setBaseCurrency('USD'));
+      unwrap(await bank(source.services.ledger, 'Bank X', ['USD', 'EUR']));
+      const text = await exportFrom(source);
+      const expected = await dump(source.driver);
+
+      const target = await device({ id: 'other' });
+      await target.services.ledger.initialize();
+      unwrap(await target.services.ledger.setBaseCurrency('EUR'));
+      unwrap(await bank(target.services.ledger, 'Bank Y', ['EUR', 'COP']));
+      unwrap(await bank(target.services.ledger, 'Bank Z', ['USD']));
+      unwrap(await restore(target, text));
+
+      expect(await dump(target.driver)).toEqual(expected);
+      expect(await target.driver.all('PRAGMA foreign_key_check')).toEqual([]);
+    });
+
     it('runs later migrations over the restored rows', async () => {
       const source = await device();
       await seed(source);

@@ -164,6 +164,41 @@ describe('account groups', () => {
         failure('group-not-found'),
       );
     });
+    it('carries a new group type to every sub-account, which mirror it', async () => {
+      const { group, accounts } = await bankX();
+
+      unwrap(await ledger.updateAccountGroup(group.id, { name: 'Bank X', type: 'Savings' }));
+
+      for (const { id } of accounts) {
+        await expect(ledger.getAccount(id)).resolves.toMatchObject({ type: 'Savings' });
+      }
+      const later = unwrap(
+        await ledger.addSubAccount(group.id, { currencyCode: 'DAI', openingBalance: '0' }),
+      );
+      expect(later.type).toBe('Savings');
+    });
+
+    it('unarchives every sub-account with the group, one archived on its own before included', async () => {
+      const { group, accounts } = await bankX();
+      const [usd, eur] = accounts;
+      const edit = { name: usd.name, type: 'Bank', openingBalance: '100', archived: true };
+      unwrap(await ledger.updateAccount({ ...edit, id: usd.id }));
+
+      unwrap(await ledger.setAccountGroupArchived(group.id, true));
+      unwrap(await ledger.setAccountGroupArchived(group.id, false));
+
+      await expect(ledger.getAccount(usd.id)).resolves.toMatchObject({ archived: false });
+      await expect(ledger.getAccount(eur.id)).resolves.toMatchObject({ archived: false });
+    });
+
+    it('refuses to add a sub-account to an archived group', async () => {
+      const { group } = await bankX();
+      unwrap(await ledger.setAccountGroupArchived(group.id, true));
+
+      await expect(
+        ledger.addSubAccount(group.id, { currencyCode: 'DAI', openingBalance: '0' }),
+      ).resolves.toMatchObject(failure('group-archived'));
+    });
   });
 
   describe('moving accounts', () => {
@@ -226,6 +261,31 @@ describe('account groups', () => {
 
       const out = unwrap(await ledger.updateAccount({ ...edit, id: accounts[0].id, groupId: null }));
       expect(out.groupId).toBeNull();
+    });
+
+    it('refuses an archived group as the target of a move, a new account, or an edit', async () => {
+      const { group, accounts } = await bankX();
+      const wallet = unwrap(await create('Wallet', 'DAI'));
+      unwrap(await ledger.setAccountGroupArchived(group.id, true));
+
+      await expect(ledger.moveAccountToGroup(wallet.id, group.id)).resolves.toMatchObject(
+        failure('group-archived'),
+      );
+      await expect(create('Crypto', 'COP', group.id)).resolves.toMatchObject(
+        failure('group-archived'),
+      );
+      const edit = { id: wallet.id, name: 'Wallet', type: 'Bank', openingBalance: '0', archived: false };
+      await expect(ledger.updateAccount({ ...edit, groupId: group.id })).resolves.toMatchObject(
+        failure('group-archived'),
+      );
+      await expect(ledger.getAccount(wallet.id)).resolves.toMatchObject({ groupId: null });
+
+      // A sub-account already in the archived group can still be edited or taken out.
+      const renamed = unwrap(
+        await ledger.updateAccount({ ...edit, id: accounts[0].id, name: 'Dollars', archived: true }),
+      );
+      expect(renamed).toMatchObject({ name: 'Dollars', groupId: group.id });
+      unwrap(await ledger.moveAccountToGroup(accounts[1].id, null));
     });
   });
 });

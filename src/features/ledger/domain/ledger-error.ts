@@ -26,7 +26,8 @@ export type LedgerErrorCode =
   | 'group-not-found'
   | 'group-empty'
   | 'duplicate-currency'
-  | 'group-currency-taken';
+  | 'group-currency-taken'
+  | 'group-archived';
 
 export type LedgerError = { readonly code: LedgerErrorCode; readonly message: string };
 

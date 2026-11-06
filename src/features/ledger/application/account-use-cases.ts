@@ -33,22 +33,25 @@ async function writeOpeningEntry(
 }
 
 /**
- * Checks that an account may sit in a group: the group exists and holds no other account in the
- * same currency. Writes nothing, so a refusal leaves the transaction untouched.
+ * Checks that an account may sit in a group: the group exists, is not archived unless the account
+ * is already in it, and holds no other account in the same currency. Writes nothing, so a refusal
+ * leaves the transaction untouched.
  */
 export async function checkGroupSlot(
   { accounts, accountGroups }: LedgerRepositories,
   groupId: string | null,
   currencyCode: string,
-  accountId?: string,
+  current?: { readonly id: string; readonly groupId: string | null },
 ): Promise<Result<void, LedgerError>> {
   if (groupId === null) return ok(undefined);
-  if (!(await accountGroups.get(groupId))) {
-    return err(ledgerError('group-not-found', 'Account group not found.'));
+  const group = await accountGroups.get(groupId);
+  if (!group) return err(ledgerError('group-not-found', 'Account group not found.'));
+  if (group.archived && current?.groupId !== groupId) {
+    return err(ledgerError('group-archived', 'This group is archived.'));
   }
   const taken = (await accounts.listUser()).some(
     (other) =>
-      other.groupId === groupId && other.currencyCode === currencyCode && other.id !== accountId,
+      other.groupId === groupId && other.currencyCode === currencyCode && other.id !== current?.id,
   );
   if (taken) {
     return err(
@@ -146,7 +149,7 @@ export function createAccountUseCases({ store, clock, generateId }: LedgerDeps) 
         const openingBalance = parseDecimal(input.openingBalance || '0', currency.decimals);
         if (!openingBalance.ok) return openingBalance;
         const groupId = input.groupId === undefined ? existing.groupId : input.groupId;
-        const slot = await checkGroupSlot(repositories, groupId, existing.currencyCode, existing.id);
+        const slot = await checkGroupSlot(repositories, groupId, existing.currencyCode, existing);
         if (!slot.ok) return slot;
 
         const account: Account = {
