@@ -20,7 +20,7 @@ export default function createConfig({ config }: ConfigContext): ExpoConfig {
     ...config,
     name: variant.name,
     slug: 'moneyforge',
-    version: '0.2.0',
+    version: '0.2.1',
     // Web is a development preview only (`pnpm web`); Android is the product target.
     platforms: ['android', 'web'],
     orientation: 'portrait',
@@ -30,7 +30,7 @@ export default function createConfig({ config }: ConfigContext): ExpoConfig {
     android: {
       package: variant.package,
       // Bump with every release so Android installs the APK as an update.
-      versionCode: 2,
+      versionCode: 3,
       // The database holds financial history, so it must not reach cloud backup.
       allowBackup: false,
       adaptiveIcon: {
