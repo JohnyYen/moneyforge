@@ -1,4 +1,5 @@
 import { systemAccountId, type Account } from '../domain/account';
+import { withGroupLabels } from '../domain/account-label';
 import type { Category } from '../domain/category';
 import type { Currency } from '../domain/currency';
 import type { Transaction } from '../domain/journal';
@@ -61,6 +62,17 @@ describe('toTransactionRow', () => {
       amount: '-$12.50',
       direction: 'out',
     });
+  });
+
+  it('names a grouped account after its group', () => {
+    const grouped = withGroupLabels(
+      [{ ...account('main', 'USD', 'USD'), groupId: 'g1' }, account('euros', 'Euros', 'EUR')],
+      [{ id: 'g1', name: 'Bank X' }],
+    );
+
+    expect(toTransactionRow(conversion, { ...lookups, accounts: grouped }).subtitle).toBe(
+      'Conversion · Bank X · USD → Euros · 2026-03-01',
+    );
   });
 
   it('shows both sides of a conversion', () => {

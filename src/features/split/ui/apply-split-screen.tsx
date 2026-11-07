@@ -74,7 +74,7 @@ export function ApplySplitScreen() {
   const load = useCallback(async () => {
     const [proposal, accounts, currencies] = await Promise.all([
       split.splitProposal(transactionId),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCurrencies(),
     ]);
     return { proposal, lookups: { accounts, currencies } };

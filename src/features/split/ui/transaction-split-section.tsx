@@ -21,7 +21,7 @@ export function TransactionSplitSection({ transaction }: { transaction: Transact
       split.splitDetails(id),
       split.splitProposal(id),
       split.moveCompletedBy(id),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCurrencies(),
     ]);
     return { details, proposal, completes, lookups: { accounts, currencies } };

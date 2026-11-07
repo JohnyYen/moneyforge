@@ -55,7 +55,7 @@ export function CashFlowScreen({ projectionExtra }: { projectionExtra?: ReactNod
     const [projection, history, accounts, currencies, base, planned] = await Promise.all([
       planning.projectCashFlow({ horizonDays: Number(horizon), includeBudgets }),
       planning.cashFlowHistory(historyPeriod, HISTORY_COUNT),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCurrencies(),
       ledger.getBaseCurrency(),
       planning.listPlannedItems(),

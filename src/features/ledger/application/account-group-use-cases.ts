@@ -2,6 +2,7 @@ import { err, ok, type Result } from '@/shared/result';
 
 import type { Account } from '../domain/account';
 import { validateGroupFields, type AccountGroup } from '../domain/account-group';
+import { withGroupLabels } from '../domain/account-label';
 import { ledgerError, type LedgerError } from '../domain/ledger-error';
 import { checkGroupSlot, insertAccount, prepareAccount } from './account-use-cases';
 import type { LedgerDeps } from './ledger-deps';
@@ -26,6 +27,18 @@ const subAccount = (group: AccountGroup, input: SubAccountInput) => ({
 export function createAccountGroupUseCases({ store, clock, generateId }: LedgerDeps) {
   return {
     listAccountGroups: () => store.accountGroups.list(),
+
+    /**
+     * The user accounts as shown outside their group: a grouped one reads "Bank X · EUR". For
+     * display and pickers only; never save one of these back.
+     */
+    listAccountsForDisplay: async (): Promise<Account[]> => {
+      const [accounts, groups] = await Promise.all([
+        store.accounts.listUser(),
+        store.accountGroups.list(),
+      ]);
+      return withGroupLabels(accounts, groups);
+    },
 
     getAccountGroup: (id: string) => store.accountGroups.get(id),
 

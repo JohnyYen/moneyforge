@@ -15,9 +15,9 @@ export function AccountDetailScreen() {
   const [limit, setLimit] = useState(TRANSACTION_PAGE_SIZE);
   const load = useCallback(async () => {
     const [balances, transactions, accounts, categories, currencies] = await Promise.all([
-      ledger.accountBalances(),
+      ledger.accountBalancesForDisplay(),
       ledger.listTransactions({ accountId: id, limit: limit + 1 }),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCategories(),
       ledger.listCurrencies(),
     ]);

@@ -68,6 +68,20 @@ describe('groupDetailModel', () => {
     expect(model).toMatchObject({ subtitle: 'Bank · Archived', archived: true });
     expect(model.availableCurrencies).toEqual([]);
   });
+
+  it('shows no total for an archived group, but an archived notice instead', () => {
+    const model = groupDetailModel(overview(closed, ['COP']), usd, [usd, eur, cop]);
+
+    expect(model).toMatchObject({
+      total: null,
+      note: null,
+      archivedNotice: 'This group is archived, so its accounts are not counted. Restore it to count them again.',
+    });
+  });
+
+  it('has no archived notice for an active group', () => {
+    expect(groupDetailModel(overview(bank), usd, [usd]).archivedNotice).toBeNull();
+  });
 });
 
 describe('validateGroupForm', () => {

@@ -108,7 +108,7 @@ export function WatchedEditorScreen() {
     const [chains, tokens, accounts, view] = await Promise.all([
       onchain.listChains(),
       onchain.listTokens(),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       id ? onchain.getWatched(id) : null,
     ]);
     return { chains, tokens, accounts, view };

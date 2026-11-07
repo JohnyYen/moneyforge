@@ -21,7 +21,7 @@ export function SplitDefaultsScreen() {
   const split = useSplit();
   const load = useCallback(async () => {
     const [accounts, categories, structures, defaults] = await Promise.all([
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCategories(),
       split.listStructures(),
       split.listSplitDefaults(),

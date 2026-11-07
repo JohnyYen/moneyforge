@@ -159,7 +159,7 @@ export function RecurringEditorScreen() {
   const router = useRouter();
   const load = useCallback(async () => {
     const [accounts, categories, currencies, item] = await Promise.all([
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCategories(),
       ledger.listCurrencies(),
       id ? planning.getItem(id) : null,

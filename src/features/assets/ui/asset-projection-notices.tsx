@@ -17,7 +17,7 @@ export function AssetProjectionNotices({ assetId }: { assetId?: string }) {
   const load = useCallback(async () => {
     const [list, accounts, items] = await Promise.all([
       assets.listAssets(),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       planning.listItems(),
     ]);
     const streams = await Promise.all(list.map(({ id }) => assets.listStreams(id)));

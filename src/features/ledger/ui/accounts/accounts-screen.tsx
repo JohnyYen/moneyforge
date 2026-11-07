@@ -26,7 +26,7 @@ export function AccountsScreen({
     // Without a base currency there are no group totals, so every account is listed on its own.
     const accounts = overview.ok
       ? overview.value
-      : { baseCurrency: '', groups: [], ungrouped: await ledger.accountBalances() };
+      : { baseCurrency: '', groups: [], ungrouped: await ledger.accountBalancesForDisplay() };
     return {
       list: accountsListModel(accounts, base),
       summary: netWorth.ok && base ? { netWorth: netWorth.value, base } : null,

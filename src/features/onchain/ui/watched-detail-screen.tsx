@@ -1,6 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback } from 'react';
 
+import { withGroupLabels } from '@/features/ledger/domain/account-label';
+import { useLedger } from '@/features/ledger/ui/ledger-context';
 import {
   Button,
   EmptyState,
@@ -54,8 +56,14 @@ function Detail({ view, error }: { view: WatchedView; error: string | null }) {
 export function WatchedDetailScreen() {
   const { id = '' } = useLocalSearchParams<{ id: string }>();
   const onchain = useOnChain();
+  const ledger = useLedger();
   const router = useRouter();
-  const load = useCallback(() => onchain.getWatched(id), [id, onchain]);
+  const load = useCallback(async () => {
+    const [view, groups] = await Promise.all([onchain.getWatched(id), ledger.listAccountGroups()]);
+    // The compared account is named outside its group, so it carries the group name.
+    const account = view?.account ? withGroupLabels([view.account], groups)[0] : null;
+    return view && { ...view, account };
+  }, [id, ledger, onchain]);
   const { state, reload } = useFocusQuery(load);
   const refresh = useSubmit(() => onchain.refresh(id), reload);
 

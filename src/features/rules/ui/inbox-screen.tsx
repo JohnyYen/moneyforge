@@ -24,7 +24,7 @@ export function InboxScreen() {
     const [sections, sources, accounts, currencies] = await Promise.all([
       rules.listInbox(),
       rules.listSources(),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCurrencies(),
     ]);
     return { sections, sources, lookups: { accounts, currencies } };

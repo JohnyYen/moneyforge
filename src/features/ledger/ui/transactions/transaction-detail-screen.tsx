@@ -43,7 +43,7 @@ export function TransactionDetailScreen({
   const load = useCallback(async () => {
     const [transaction, accounts, categories, currencies] = await Promise.all([
       ledger.getTransaction(id),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCategories(),
       ledger.listCurrencies(),
     ]);

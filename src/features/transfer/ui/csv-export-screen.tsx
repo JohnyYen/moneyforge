@@ -23,7 +23,7 @@ const ALL_ACCOUNTS = 'all';
 export function CsvExportScreen() {
   const ledger = useLedger();
   const transfer = useTransfer();
-  const load = useCallback(() => ledger.accountBalances(), [ledger]);
+  const load = useCallback(() => ledger.accountBalancesForDisplay(), [ledger]);
   const { state, reload } = useFocusQuery(load);
   const [accountId, setAccountId] = useState(ALL_ACCOUNTS);
   const [from, setFrom] = useState('');

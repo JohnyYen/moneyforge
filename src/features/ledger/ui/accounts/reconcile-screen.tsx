@@ -15,7 +15,7 @@ export function ReconcileScreen() {
   const router = useRouter();
   const load = useCallback(
     async () =>
-      (await ledger.accountBalances()).find(({ account }) => account.id === id) ?? null,
+      (await ledger.accountBalancesForDisplay()).find(({ account }) => account.id === id) ?? null,
     [id, ledger],
   );
   const { state, reload } = useFocusQuery(load);

@@ -22,7 +22,7 @@ export function TransactionsScreen() {
         accountId: accountId === ALL ? undefined : accountId,
         limit: limit + 1,
       }),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCategories(),
       ledger.listCurrencies(),
     ]);

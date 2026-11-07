@@ -328,4 +328,25 @@ describe('account groups', () => {
       expect(left).toMatchObject({ type: 'Cash', groupId: null });
     });
   });
+
+  describe('display labels', () => {
+    it('names grouped accounts after their group, following a rename, without changing stored names', async () => {
+      const { group, accounts } = await bankX();
+      const wallet = unwrap(
+        await ledger.createAccount({ name: 'Wallet', type: 'Cash', currencyCode: 'COP', openingBalance: '0' }),
+      );
+      unwrap(await ledger.updateAccountGroup(group.id, { name: 'Bank Z', type: 'Bank' }));
+
+      const labels = (await ledger.listAccountsForDisplay()).map(({ id, name }) => [id, name]);
+
+      expect(labels).toEqual(
+        expect.arrayContaining([
+          [accounts[0].id, 'Bank Z · USD'],
+          [accounts[1].id, 'Bank Z · Euro savings'],
+          [wallet.id, 'Wallet'],
+        ]),
+      );
+      expect((await ledger.getAccount(accounts[0].id))?.name).toBe('USD');
+    });
+  });
 });

@@ -134,7 +134,7 @@ export function AssetEditorScreen() {
   const load = useCallback(async () => {
     const [types, accounts, currencies, base, asset] = await Promise.all([
       assets.listTypes(),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCurrencies(),
       ledger.getBaseCurrency(),
       id ? assets.getAsset(id) : null,

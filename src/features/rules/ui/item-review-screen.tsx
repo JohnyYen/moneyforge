@@ -225,7 +225,7 @@ export function ItemReviewScreen() {
     const [details, sections, accounts, categories, currencies] = await Promise.all([
       rules.getItem(id),
       rules.listInbox(),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCategories(),
       ledger.listCurrencies(),
     ]);

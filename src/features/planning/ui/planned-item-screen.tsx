@@ -31,7 +31,7 @@ export function PlannedItemScreen() {
   const ledger = useLedger();
   const router = useRouter();
   const load = useCallback(
-    async () => (await ledger.listAccounts()).filter(({ archived }) => !archived),
+    async () => (await ledger.listAccountsForDisplay()).filter(({ archived }) => !archived),
     [ledger],
   );
   const { state, reload } = useFocusQuery(load);

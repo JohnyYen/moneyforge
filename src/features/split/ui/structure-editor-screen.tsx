@@ -18,7 +18,7 @@ export function StructureEditorScreen() {
   const router = useRouter();
   const load = useCallback(async () => {
     const [accounts, structure] = await Promise.all([
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       id ? split.getStructure(id) : null,
     ]);
     const used = new Set(structure?.lines.map(({ targetAccountId }) => targetAccountId));

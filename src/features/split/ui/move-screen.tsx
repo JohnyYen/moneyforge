@@ -126,7 +126,7 @@ export function MoveScreen() {
   const load = useCallback(async () => {
     const [move, accounts, currencies] = await Promise.all([
       split.getMove(id),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCurrencies(),
     ]);
     return { move, lookups: { accounts, currencies } };

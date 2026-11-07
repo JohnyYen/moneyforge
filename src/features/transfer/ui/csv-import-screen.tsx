@@ -40,7 +40,7 @@ export function CsvImportScreen() {
   const transfer = useTransfer();
   const load = useCallback(async () => {
     const [balances, categories] = await Promise.all([
-      ledger.accountBalances(),
+      ledger.accountBalancesForDisplay(),
       ledger.listCategories(),
     ]);
     return {

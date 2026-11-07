@@ -54,6 +54,7 @@ export function GroupDetailView({
         {model.title} · {model.subtitle}
       </Muted>
       {model.total ? <Title>{model.total}</Title> : null}
+      {model.archivedNotice ? <Notice>{model.archivedNotice}</Notice> : null}
       {model.note ? <Notice>{model.note}</Notice> : null}
       <ErrorBanner message={error} />
       <SectionLabel>Accounts</SectionLabel>

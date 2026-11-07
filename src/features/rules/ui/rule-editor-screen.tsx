@@ -31,7 +31,7 @@ export function RuleEditorScreen() {
 
   const load = useCallback(async () => {
     const [accounts, categories, currencies, structures, rule, details] = await Promise.all([
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCategories(),
       ledger.listCurrencies(),
       split.listStructures(),

@@ -26,7 +26,7 @@ export function PackImportScreen() {
   const rules = useRules();
   const load = useCallback(async () => {
     const [balances, categories] = await Promise.all([
-      ledger.accountBalances(),
+      ledger.accountBalancesForDisplay(),
       ledger.listCategories(),
     ]);
     return {

@@ -134,4 +134,19 @@ describe('accounts overview', () => {
       value: { total: { minor: 16000n, currency: 'USD' }, missingRates: [] },
     });
   });
+
+  it('labels balances for display with their group name', async () => {
+    const { accounts } = await bankX();
+    const wallet = unwrap(
+      await ledger.createAccount({ name: 'Wallet', type: 'Cash', currencyCode: 'USD', openingBalance: '5' }),
+    );
+
+    const labelled = await ledger.accountBalancesForDisplay();
+
+    expect(labelled.find(({ account }) => account.id === accounts[1].id)).toMatchObject({
+      account: { name: 'Bank X · EUR' },
+      balance: 5000n,
+    });
+    expect(labelled.find(({ account }) => account.id === wallet.id)?.account.name).toBe('Wallet');
+  });
 });

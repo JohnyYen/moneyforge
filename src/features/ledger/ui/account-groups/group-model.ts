@@ -18,6 +18,8 @@ export type GroupDetailModel = {
   readonly total: string | null;
   readonly note: string | null;
   readonly archived: boolean;
+  /** Shown in place of a total, which would read as if the money were gone. */
+  readonly archivedNotice: string | null;
   readonly accounts: readonly AccountRowModel[];
   readonly archivedAccounts: readonly AccountRowModel[];
   /** Currencies a new sub-account may use: none the group already holds, archived ones included. */
@@ -33,9 +35,12 @@ export function groupDetailModel(
   return {
     title: group.name,
     subtitle: group.archived ? `${group.type} · Archived` : group.type,
-    total: base ? formatDisplay(total, base) : null,
-    note: missingRatesNote(missingRates),
+    total: base && !group.archived ? formatDisplay(total, base) : null,
+    note: group.archived ? null : missingRatesNote(missingRates),
     archived: group.archived,
+    archivedNotice: group.archived
+      ? 'This group is archived, so its accounts are not counted. Restore it to count them again.'
+      : null,
     accounts: accounts.filter(({ account }) => !account.archived).map(subAccountRow),
     archivedAccounts: accounts.filter(({ account }) => account.archived).map(subAccountRow),
     availableCurrencies: group.archived ? [] : currencies.filter(({ code }) => !held.has(code)),

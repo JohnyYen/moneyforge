@@ -2,6 +2,7 @@ import { err, ok, type Result } from '@/shared/result';
 
 import type { Account } from '../domain/account';
 import type { AccountGroup } from '../domain/account-group';
+import { accountLabel, groupNamesById } from '../domain/account-label';
 import type { Currency } from '../domain/currency';
 import { isValidDate, type ExchangeRate } from '../domain/exchange-rate';
 import { computeGroupBalance, type GroupBalance } from '../domain/group-balance';
@@ -60,6 +61,16 @@ export function createOverviewUseCases({ store, clock, generateId }: LedgerDeps)
 
   return {
     accountBalances,
+
+    /** Like `accountBalances`, with each grouped account named "Bank X · EUR", for display only. */
+    async accountBalancesForDisplay(): Promise<AccountBalance[]> {
+      const [balances, groups] = await Promise.all([accountBalances(), store.accountGroups.list()]);
+      const names = groupNamesById(groups);
+      return balances.map((item) => ({
+        ...item,
+        account: { ...item.account, name: accountLabel(item.account, names) },
+      }));
+    },
 
     /**
      * Every group, archived ones included, with its sub-accounts and their total in the base

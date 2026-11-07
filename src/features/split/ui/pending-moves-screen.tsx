@@ -15,7 +15,7 @@ export function PendingMovesScreen() {
   const load = useCallback(async () => {
     const [moves, accounts, currencies] = await Promise.all([
       split.listPendingMoves(),
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCurrencies(),
     ]);
     return { moves, lookups: { accounts, currencies } };

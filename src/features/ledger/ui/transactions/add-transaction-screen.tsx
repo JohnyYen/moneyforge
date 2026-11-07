@@ -26,7 +26,7 @@ export function AddTransactionScreen({
   const router = useRouter();
   const load = useCallback(async () => {
     const [accounts, categories, currencies] = await Promise.all([
-      ledger.listAccounts(),
+      ledger.listAccountsForDisplay(),
       ledger.listCategories(),
       ledger.listCurrencies(),
     ]);
